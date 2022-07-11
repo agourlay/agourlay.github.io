@@ -1,37 +1,37 @@
 +++
 title = "A performance restrospective using Rust (part 1)"
-description = "First part of a restrospective regarding the work that went into making a simple JVM heap analyzer faster over time."
+description = "First part of a restrospective regarding making a simple JVM heap analyzer faster over time."
 date = 2022-07-11
 [taxonomies]
 tags=["Rust", "Performance", "hprof-slurp"]
 categories=["series"]
 +++
 
-This is the first article of a series regarding making a simple JVM heap dump analyzer in Rust faster over time.
+This is the first article in a series regarding making a simple JVM heap dump analyzer in Rust faster over time.
 
-Although it is primarily targeted at intermediate Rust developpers, it will surely be relevant for engineers interested in performance in general.
+Although it is primarily targeted at intermediate Rust developers, it will surely be relevant for engineers interested in performance in general.
 
-Performance optimization is highly context dependant so it makes sense to spend some time explaining what problem we are trying to solve.
+Performance optimization is highly context-dependent so it makes sense to spend some time explaining what problem we are trying to solve.
 
 ## Context
 
-In a previous life, I found myself with the need to analyze large JVM heap dumps. For a sense of scale, large stands for more than 50Gb in that context.
+In a previous life, I found myself needing to analyze large JVM heap dumps. For a sense of scale, "large" stands for more than 50Gb in that context.
 
-The JVM ecosystem is pretty rich in terms of tooling regarding heap dump analysis. Most JVM developpers are familiar with [VisualVM](https://visualvm.github.io/) and [EclipseMat](https://www.eclipse.org/mat/).
+The JVM ecosystem is pretty rich in terms of tooling regarding heap dump analysis. Most JVM developers are familiar with [VisualVM](https://visualvm.github.io/) and [EclipseMat](https://www.eclipse.org/mat/).
 
-Those tools are truly excellent, they offer a large panel of [features](https://eclipsesource.com/blogs/2013/01/21/10-tips-for-using-the-eclipse-memory-analyzer/) to drill down on the content of heap dumps to help you pin point your issue very precisely.
+Those tools are truly excellent; they offer a large panel of [features](https://eclipsesource.com/blogs/2013/01/21/10-tips-for-using-the-eclipse-memory-analyzer/) to drill down on the content of heap dumps to help you pin point your issue very precisely.
 
-However, they tend to be extremely memory hungry and slow when analyzing large files which is forcing users to spin up expensive beefy instance in a cloud provider to get the job done.
+However, they tend to be extremely memory hungry and slow when analyzing large files, which is forcing users to spin up expensive beefy instance from a cloud provider to get the job done.
 
-The tool I needed was fairly specific, my main concern was to get a quick overview on large heap dumps using a regular developer machine to decide if it actually makes sense to investigate further using the aformentioned workflow.
+The tool I needed was fairly specific, my main concern was to get a quick overview of large heap dumps using a regular developer machine to decide if it actually makes sense to investigate further using the aforementioned workflow.
 
-The goal is not to replace the existing tooling but to optimize the investigation worflow and this led me to creating the [hprof-slurp](https://github.com/agourlay/hprof-slurp) project.
+The goal is not to replace the existing tooling but to optimize the investigation workflow and this led me to create the [hprof-slurp](https://github.com/agourlay/hprof-slurp) project.
 
 ## Hprof-slurp
 
 The project is a CLI written in Rust which processes dump files in a streaming fashion.
 
-It is trading off features for speed by performing only a single pass without storing intermediary results on the host which reduces the depth of the analysis possible.
+It trades off features for speed by performing only a single pass without storing intermediary results on the host, which reduces the depth of the analysis possible.
 
 The project is named after the [hprof](https://docs.oracle.com/javase/8/docs/technotes/samples/hprof.html) format which is used by the JDK to encode heap dumps.
 
@@ -112,7 +112,7 @@ And that's all there is to it.
 
 ## Architecture
 
-As mentioned previously the CLI is written in Rust and works in a synchronous multithreaded fashion.
+As mentioned previously, the CLI is written in Rust and works in a synchronous multithreaded fashion.
 
 Here is a simplified architecture diagram for the current version (0.4.7).
 
@@ -120,28 +120,30 @@ Here is a simplified architecture diagram for the current version (0.4.7).
 
 The various threads are wired up together via channels to form a processing pipeline where all stages run in parallel (if the host has enough cores).
 
-The file reader thread pro-actively loads chunks of 64Mb from the input file to not starve the rest of the pipeline on waiting for IO. Loading too many chunks in advance has a direct impact on the memory usage so I settled on 3 based on experiments.
+The file reader thread pro-actively loads chunks of 64Mb from the input file to not starve the rest of the pipeline while waiting for IO. Loading too many chunks in advance has a direct impact on the memory usage, so I settled on 3 chunks based on experiments.
 
 Those chunks are then sent over to the streaming parser which was the most challenging work of the project because it must handle incomplete inputs.
-A single chunk can contain millions of records and a chunk is not of course aligned on the actual boundary of the `hprof` records.
+A single chunk can contain millions of records, and a chunk is of course not aligned on the actual boundary of the `hprof` records.
 
-Therefore the parser tries to make sense of the incoming binary data while carefully managing its inner buffer.
+Therefore, the parser tries to make sense of the incoming binary data while carefully managing its inner buffer.
 
-More concretely, tt has been written by following the [full specification of the hprof format](https://hg.openjdk.java.net/jdk/jdk/file/ee1d592a9f53/src/hotspot/share/services/heapDumper.cpp#l62) found in the heap dumper code of the JDK.
+More concretely, it has been written by following the [full specification of the hprof format](https://hg.openjdk.java.net/jdk/jdk/file/ee1d592a9f53/src/hotspot/share/services/heapDumper.cpp#l62) found in the heap dumper code of the JDK.
 
-The parser itself is written with the [nom](https://github.com/Geal/nom) library which I found a real pleasure to work with due to its support for parsing incomplete data.
+The parser itself is written with the [nom](https://github.com/Geal/nom) library, which I found a real pleasure to work with due to its support for parsing incomplete data.
 
 As the content of the file is streamed through the parser, the classes information is extracted and forwarded to the statistics recorder thread which keeps track of the instance counts in order to later compute the heavy hitters.
 
-Spoiler alert, as of version 0.4.7 the performance bottleneck is the parsing thread, speeding up other stages of the pipelines would not yield any performance improvements.
+Spoiler alert: as of version 0.4.7, the performance bottleneck is the parsing thread.
+
+Speeding up other stages of the pipelines would not yield any performance improvements.
 
 ## Test data
 
-We are about to do some performance testing which means we need some meaningful test data.
+We are about to do some performance testing, which means we need some meaningful test data.
 
 For the sake of transparency or reproducibility, I will show you exactly how to generate a similar heap dump.
 
-To avoid completely synthetic data, we will be using the [Spring's REST petclinic](https://github.com/spring-petclinic/spring-petclinic-rest).
+To avoid completely synthetic data, we will be using [Spring's REST petclinic](https://github.com/spring-petclinic/spring-petclinic-rest).
 
 It is a reasonable choice because it is relatively well known and it uses an in-memory database by default which naturally amplifies the memory usage.
 
@@ -180,7 +182,7 @@ In any case we can start the application using Maven.
 ./mvnw spring-boot:run
 ```
 
-In order to increase the memory pressure, we will gently hammer one of the REST endpoints using [Hey](https://github.com/rakyll/hey)
+In order to increase the memory pressure, we will gently hammer one of the REST endpoints using [Hey](https://github.com/rakyll/hey).
 
 ```bash
 hey -m POST \
@@ -281,13 +283,13 @@ This output looks about right for an application using an in-memory database. We
 
 It is often interesting to track the performance of a piece of software over time to be able to attribute gains to precise changes.
 
-Sometimes a single line change can have a tremendous effect and sometimes a complete change of architecture is required to remove a bottleneck.
+Sometimes a single line change can have a tremendous effect, and sometimes a complete change of architecture is required to remove a bottleneck.
 
 Using the benchmarking tool [hyperfine](https://github.com/sharkdp/hyperfine) we are able to measure accurately the execution time of our CLI in a blackbox fashion.
 
 For reference, I will be running the benchmarks on a laptop running Linux on an Intel [i7-10610U](https://www.intel.com/content/www/us/en/products/sku/201896/intel-core-i710610u-processor-8m-cache-up-to-4-90-ghz/specifications.html) CPU.  
 
-In this comparison analysis we are interested in the relative speedup between releases and not the absolute durations which are mostly a function of the dump size given a stable thoughtput.
+In this comparison analysis, we are interested in the relative speedup between releases and not the absolute durations, which are mostly a function of the dump size given a stable thoughtput.
 
 After downloading all the versions of `hprof-slurp` into the same directory, we can compare how they handle the `pets.bin` heap dump using the following `hyperfine` magic incantation.
 
@@ -344,9 +346,9 @@ Some observations:
 - 0.1.0 has a large variance (might be a warmup issue)
 - starting from 0.4.5 the iterative improvement is minimal
 
-In any case we reached a solid 1Gb/s throughput in the latest version given the size of our test file.
+In any case, we reached a solid 1Gb/s throughput in the latest version given the size of our test file.
 
-Let's have a look at the peak memory comsumption for 0.4.7 using [Heaptrack](https://github.com/KDE/heaptrack).
+Let's have a look at the peak memory consumption for 0.4.7 using [Heaptrack](https://github.com/KDE/heaptrack).
 
 ```bash
 heaptrack ./hprof-slurp-0.4.7 -i pets.bin
@@ -356,7 +358,7 @@ This opens up the UI directly after the run if it is installed.
 
 ![image info](/2022-07-11/latest-heaptrack-consumed.png)
 
-The memory usage is pretty stable, it seems we have been able to stream the whole 34 Gb file within 500Mb.
+The memory usage is pretty stable; it seems we have been able to stream the whole 34 Gb file within 500Mb.
 
 Most of it is actually due to the various internal buffers which are used to communicate between the threads.
 Those are pre-allocated and can grow to a certain size before being shrunk to release the memory.
@@ -365,22 +367,22 @@ One could expect a stable similar memory usage for much larger dumps unless thos
 
 ## Future work
 
-Obviously I am still interested in making `hprof-slurp` faster - hopefully not at the expense of code readability.
+Obviously, I am still interested in making `hprof-slurp` faster — hopefully not at the expense of code readability.
 
-Outside of the performance concern, I believe the ouput could still be improved to be more useful.
+Outside of the performance concern, I believe the output could still be improved to be more useful.
 
 First, I would like to validate the precision of the statistics reported by comparing the output of `hprof-slurp` against the existing tools. My gut feeling is that the numbers are not too far off and serve as a pretty good proxy.
 
 Moreover, additional extractions could be performed as long as it happens in a single pass, such as rendering the complete thread stack traces at the moment of the heap dump.
 
-Feel free to reach out if you have suggestions.
+Feel free to [reach out](/pages/about) if you have suggestions.
 
 ## Conclusion
 
-This article has shown that [hprof-slurp](https://github.com/agourlay/hprof-slurp) got faster over time and that it is now processing heap dumps at around 1Gb/s.
+This article has shown that [hprof-slurp](https://github.com/agourlay/hprof-slurp) has gotten faster over time and that it is now processing heap dumps at around 1Gb/s.
 
-It fullfills the initial goal which was to offer a quick overview of large heap dumps using a regular developer machine.
+It fulfills the initial goal, which was to offer a quick overview of large heap dumps using a regular developer machine.
 
-The next articles of this series will go through a selection of the most interesting optimizations which had the largest impact on performance.
+The next articles in this series will go through a selection of the most interesting optimizations that had the largest impact on performance.
 
-In the meantime you can try to reproduce those results or even better, analyze larger real world heap dumps!
+In the meantime, you can try to reproduce those results or, even better, analyze larger real-world heap dumps!
