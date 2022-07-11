@@ -1,6 +1,6 @@
 +++
-title = "A performance restrospective using Rust (part 1)"
-description = "First part of a restrospective regarding making a simple JVM heap analyzer faster over time."
+title = "A performance retrospective using Rust (part 1)"
+description = "First part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust."
 date = 2022-07-11
 [taxonomies]
 tags=["Rust", "Performance", "hprof-slurp"]
