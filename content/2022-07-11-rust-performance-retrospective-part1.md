@@ -383,6 +383,6 @@ This article has shown that [hprof-slurp](https://github.com/agourlay/hprof-slur
 
 It fulfills the initial goal, which was to offer a quick overview of large heap dumps using a regular developer machine.
 
-The next articles in this series will go through a selection of the most interesting optimizations that had the largest impact on performance.
+The next articles in this [series](/categories/series/) will go through a selection of the most interesting optimizations that had the largest impact on performance.
 
 In the meantime, you can try to reproduce those results or, even better, analyze larger real-world heap dumps!
