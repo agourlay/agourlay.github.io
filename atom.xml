@@ -1,0 +1,668 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+	<title>Arnaud Gourlay&#x27;s blog</title>
+	<subtitle>Yet another programming blog</subtitle>
+	<link href=" https://agourlay.github.io/atom.xml" rel="self" type="application/atom+xml"/>
+  <link href=" https://agourlay.github.io"/>
+	<generator uri="https://www.getzola.org/">Zola</generator>
+	<updated>2022-07-23T00:00:00+00:00</updated>
+	<id> https://agourlay.github.io/atom.xml</id>
+	<entry xml:lang="en">
+		<title>A performance retrospective using Rust (part 2)</title>
+		<published>2022-07-23T00:00:00+00:00</published>
+		<updated>2022-07-23T00:00:00+00:00</updated>
+		<link href=" https://agourlay.github.io/rust-performance-retrospective-part2/" type="text/html"/>
+		<id> https://agourlay.github.io/rust-performance-retrospective-part2/</id>
+		<content type="html">&lt;p&gt;This article is the second part of a performance retrospective regarding the &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;agourlay&#x2F;hprof-slurp&quot;&gt;hprof-slurp&lt;&#x2F;a&gt; project. It is highly recommended to start with the &lt;a href=&quot;&#x2F;rust-performance-retrospective-part1&#x2F;&quot;&gt;first part&lt;&#x2F;a&gt; to get a good grasp of the context.&lt;&#x2F;p&gt;
+&lt;p&gt;We left off after a presentation of the project and a detailed description of the benchmarking methodology used to measure performance gains.&lt;&#x2F;p&gt;
+&lt;p&gt;In this article we will focus on a specific issue that has been plaguing the 0.3.x series.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;avoiding-memcopy&quot;&gt;Avoiding memcopy&lt;&#x2F;h2&gt;
+&lt;p&gt;As the program got faster, I witnessed the &lt;code&gt;memcpy&lt;&#x2F;code&gt; instructions slowly creeping up in the flamegraphs to the point where they accounted for most of the computation.&lt;&#x2F;p&gt;
+&lt;p&gt;Below - in purple - you can see the &lt;code&gt;_memcpy_avx_unaligned_erms&lt;&#x2F;code&gt; representing most of the work in the parser thread (full &lt;a href=&quot;&#x2F;2022-07-23&#x2F;flamegraph-0.3.3.svg&quot;&gt;flamegraph&lt;&#x2F;a&gt;).&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;img src=&quot;&#x2F;2022-07-23&#x2F;flamegraph-memcopy.png&quot; alt=&quot;image info&quot; &#x2F;&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;At first, I thought it was an inherent cost of parsing large files, but as it grew to become the largest bottleneck in &lt;code&gt;hprof-slurp&lt;&#x2F;code&gt;, I decided to investigate the issue to - at the very least - understand it.&lt;&#x2F;p&gt;
+&lt;p&gt;I found the answer to this mystery in the fantastic &lt;a href=&quot;https:&#x2F;&#x2F;nnethercote.github.io&#x2F;perf-book&#x2F;type-sizes.html&quot;&gt;Rust performance book&lt;&#x2F;a&gt;.&lt;&#x2F;p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Rust types that are larger than 128 bytes are copied with memcpy rather than inline code.
+Shrinking these types to 128 bytes or less can make the code faster by avoiding memcpy calls and reducing memory traffic.&lt;&#x2F;p&gt;
+&lt;&#x2F;blockquote&gt;
+&lt;p&gt;Therefore, within my code I needed to find the large types that are used very often on the parser&#x27;s path.&lt;&#x2F;p&gt;
+&lt;p&gt;Let&#x27;s generate the type sizes with:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;RUSTFLAGS&lt;&#x2F;span&gt;&lt;span&gt;=&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;-Zprint-type-sizes &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;cargo&lt;&#x2F;span&gt;&lt;span&gt; +nightly build&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; --release
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;In my opinion, it can be a bit cumbersome to navigate the output of &lt;code&gt;-Zprint-type-sizes&lt;&#x2F;code&gt;.&lt;&#x2F;p&gt;
+&lt;p&gt;One alternative recommended by the Rust performance book is to use  DHAT’s “copy profiling” mode, which works great as well.&lt;&#x2F;p&gt;
+&lt;p&gt;I will stick to &lt;code&gt;-Zprint-type-sizes&lt;&#x2F;code&gt; for the remainder of the article as it helps understand the memory layout on the way.&lt;&#x2F;p&gt;
+&lt;p&gt;Looking at the types I own in the output section, we can find the following&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt; type: `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;parser::record::Record&lt;&#x2F;span&gt;&lt;span&gt;`: 136 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     discriminant: 2 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     variant `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;GcSegment&lt;&#x2F;span&gt;&lt;span&gt;`: 134 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 6 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.0&lt;&#x2F;span&gt;&lt;span&gt;`: 128 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     variant `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;AllocationSites&lt;&#x2F;span&gt;&lt;span&gt;`: 62 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.flags&lt;&#x2F;span&gt;&lt;span&gt;`: 2 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.cutoff_ratio&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.total_live_bytes&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.total_live_instances&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.number_of_sites&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.total_bytes_allocated&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.total_instances_allocated&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.allocation_sites&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;...&lt;&#x2F;span&gt;&lt;span&gt; more variants with decreasing size
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;The &lt;code&gt;parser::record::Record&lt;&#x2F;code&gt; is an enum which represents all possible top-level records found in an &lt;code&gt;hprof&lt;&#x2F;code&gt; file.&lt;&#x2F;p&gt;
+&lt;p&gt;The largest variant is &lt;code&gt;GcSegment&lt;&#x2F;code&gt; with 134 bytes, which is larger than the 128 bytes mentioned above.&lt;&#x2F;p&gt;
+&lt;p&gt;The corresponding Rust code looks like the following:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;rust&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-rust &quot;&gt;&lt;code class=&quot;language-rust&quot; data-lang=&quot;rust&quot;&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;pub enum &lt;&#x2F;span&gt;&lt;span&gt;Record {
+&lt;&#x2F;span&gt;&lt;span&gt;  GcSegment(GcRecord),
+&lt;&#x2F;span&gt;&lt;span&gt;  AllocationSites {
+&lt;&#x2F;span&gt;&lt;span&gt;    flags: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u16&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    cutoff_ratio: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    total_live_bytes: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    total_live_instances: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    total_bytes_allocated: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    total_instances_allocated: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    number_of_sites: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    allocation_sites: Vec&amp;lt;AllocationSite&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;  },
+&lt;&#x2F;span&gt;&lt;span&gt;  ... more variants
+&lt;&#x2F;span&gt;&lt;span&gt;}  
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;The &lt;code&gt;parser::gc_record::GcRecord&lt;&#x2F;code&gt; is itself an enum as well. It models all possible elements found on the JVM&#x27;s heap.&lt;&#x2F;p&gt;
+&lt;p&gt;Let&#x27;s find in the output the size of a &lt;code&gt;GcRecord&lt;&#x2F;code&gt;.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt; type: `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;parser::gc_record::GcRecord&lt;&#x2F;span&gt;&lt;span&gt;`: 128 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     discriminant: 1 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     variant `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;ClassDump&lt;&#x2F;span&gt;&lt;span&gt;`: 127 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 1 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.constant_pool_size&lt;&#x2F;span&gt;&lt;span&gt;`: 2 bytes, alignment: 2 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.stack_trace_serial_number&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.instance_size&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.class_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.super_class_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.class_loader_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.signers_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.protection_domain_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.const_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.static_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.instance_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     variant `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;ObjectArrayDump&lt;&#x2F;span&gt;&lt;span&gt;`: 55 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 3 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.stack_trace_serial_number&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes, alignment: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.number_of_elements&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.array_class_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.elements&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;...&lt;&#x2F;span&gt;&lt;span&gt; more variant with decreasing size
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;For the following definition:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;rust&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-rust &quot;&gt;&lt;code class=&quot;language-rust&quot; data-lang=&quot;rust&quot;&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;pub enum &lt;&#x2F;span&gt;&lt;span&gt;GcRecord {
+&lt;&#x2F;span&gt;&lt;span&gt;    ClassDump {
+&lt;&#x2F;span&gt;&lt;span&gt;        class_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        stack_trace_serial_number: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        super_class_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        class_loader_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        signers_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        protection_domain_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        instance_size: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        constant_pool_size: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u16&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        const_fields: Vec&amp;lt;(ConstFieldInfo, FieldValue)&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        static_fields: Vec&amp;lt;(FieldInfo, FieldValue)&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        instance_fields: Vec&amp;lt;FieldInfo&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    },
+&lt;&#x2F;span&gt;&lt;span&gt;    ObjectArrayDump {
+&lt;&#x2F;span&gt;&lt;span&gt;        object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        stack_trace_serial_number: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        number_of_elements: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        array_class_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        elements: Vec&amp;lt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    },
+&lt;&#x2F;span&gt;&lt;span&gt;    ... more variants
+&lt;&#x2F;span&gt;&lt;span&gt;}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;At this point, we can see that there is logically a direct mapping between the fields of the structs and their actual sizes.&lt;&#x2F;p&gt;
+&lt;p&gt;Moreover, there is a critical observation to make regarding enums.&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;strong&gt;Enums are sized according to the largest variant&lt;&#x2F;strong&gt;.&lt;&#x2F;p&gt;
+&lt;p&gt;An enum is sized with its largest variant plus some memory for an internal discriminant field.&lt;&#x2F;p&gt;
+&lt;p&gt;This means the 134 bytes for a &lt;code&gt;GcSegment&lt;&#x2F;code&gt; are being allocated for every &lt;code&gt;parser::record::Record&lt;&#x2F;code&gt; variants.&lt;&#x2F;p&gt;
+&lt;p&gt;This quickly adds up when a program is crunching millions of records.&lt;&#x2F;p&gt;
+&lt;p&gt;The common wisdom for decreasing the stack memory footprint is to use heap allocation, often referred to as boxing.&lt;&#x2F;p&gt;
+&lt;p&gt;Let&#x27;s try boxing the content of &lt;code&gt;GcSegment&lt;&#x2F;code&gt;.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;rust&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-rust &quot;&gt;&lt;code class=&quot;language-rust&quot; data-lang=&quot;rust&quot;&gt;&lt;span&gt;GcSegment(Box&amp;lt;GcRecord&amp;gt;),
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;This change gives the following type sizes (after applying the necessary modifications to handle the new Box type at the call sites).&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt; type: `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;parser::record::Record&lt;&#x2F;span&gt;&lt;span&gt;`: 64 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     discriminant: 2 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     variant `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;AllocationSites&lt;&#x2F;span&gt;&lt;span&gt;`: 62 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.flags&lt;&#x2F;span&gt;&lt;span&gt;`: 2 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.cutoff_ratio&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.total_live_bytes&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.total_live_instances&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.number_of_sites&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.total_bytes_allocated&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.total_instances_allocated&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.allocation_sites&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;...&lt;&#x2F;span&gt;&lt;span&gt; more variant with decreasing size
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     variant `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;GcSegment&lt;&#x2F;span&gt;&lt;span&gt;`: 14 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 6 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.0&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Looking good!&lt;&#x2F;p&gt;
+&lt;p&gt;The type &lt;code&gt;parser::record::Record&lt;&#x2F;code&gt; went from 136 bytes to 64 bytes because all variants are now sized according to the next largest variant, &lt;code&gt;AllocationSites&lt;&#x2F;code&gt; at 62 bytes.&lt;&#x2F;p&gt;
+&lt;p&gt;The &lt;code&gt;memcpy&lt;&#x2F;code&gt; should not be a problem anymore.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;hyperfine --runs&lt;&#x2F;span&gt;&lt;span&gt; 3 \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; --export-markdown&lt;&#x2F;span&gt;&lt;span&gt; hprof.md \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.3.3 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.3.3 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; box &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th align=&quot;left&quot;&gt;Command&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Mean [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Min [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Max [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Relative&lt;&#x2F;th&gt;&lt;&#x2F;tr&gt;&lt;&#x2F;thead&gt;&lt;tbody&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.3.3&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;77.442 ± 2.537&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;74.513&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;78.968&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.00&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;box&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;270.785 ± 0.907&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;270.031&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;271.792&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;3.50 ± 0.12&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;&#x2F;tbody&gt;&lt;&#x2F;table&gt;
+&lt;p&gt;Ouch! It is more than three hundred percent slower!&lt;&#x2F;p&gt;
+&lt;p&gt;Let&#x27;s have a look at the flamegraph to understand where the CPU spends its time.&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;img src=&quot;&#x2F;2022-07-23&#x2F;flamegraph-box.png&quot; alt=&quot;image info&quot; &#x2F;&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;In purple you can see the cost of &lt;code&gt;Box::new&lt;&#x2F;code&gt; in the parser thread (full &lt;a href=&quot;&#x2F;2022-07-23&#x2F;flamegraph-box.svg&quot;&gt;flamegraph&lt;&#x2F;a&gt; available).&lt;&#x2F;p&gt;
+&lt;p&gt;Welp, we did fix the &lt;code&gt;memcpy&lt;&#x2F;code&gt; issue, but the application is terribly slow.&lt;&#x2F;p&gt;
+&lt;p&gt;Boxing is, unfortunately, not some kind of magic sauce that will fix all our problems.&lt;&#x2F;p&gt;
+&lt;p&gt;Performing heap allocation has a higher cost than stack allocation, and we are now performing it for each instance found in the JVM heap dump.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;reasonnable-boxing&quot;&gt;Reasonnable boxing&lt;&#x2F;h2&gt;
+&lt;p&gt;In the previous section, we have seen that &lt;code&gt;GcSegment&lt;&#x2F;code&gt; cannot be boxed efficiently because it appears too frequently during the execution of the application.&lt;&#x2F;p&gt;
+&lt;p&gt;We also have seen that the largest variant of &lt;code&gt;GcSegment&lt;&#x2F;code&gt; is &lt;code&gt;ClassDump&lt;&#x2F;code&gt;, clocking in at 127 bytes.&lt;&#x2F;p&gt;
+&lt;p&gt;Based on the enumeration sizing discovery, we know that the 127 bytes for a &lt;code&gt;ClassDump&lt;&#x2F;code&gt; are being allocated for every &lt;code&gt;GcSegment&lt;&#x2F;code&gt; record.&lt;&#x2F;p&gt;
+&lt;p&gt;However, the &lt;code&gt;ClassDump&lt;&#x2F;code&gt; is a relatively rare element compared to the actual instance dumps. An application has a few hundred classes but millions of instances.&lt;&#x2F;p&gt;
+&lt;p&gt;It is unfortunate to systematically pay the full price for something that is unfrequent.&lt;&#x2F;p&gt;
+&lt;p&gt;The intuition is that we should be moving the boxing cost to the &lt;code&gt;ClassDump&lt;&#x2F;code&gt; only.&lt;&#x2F;p&gt;
+&lt;p&gt;Let&#x27;s try to box the individual fields in &lt;code&gt;ClassDump&lt;&#x2F;code&gt; instead.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;rust&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-rust &quot;&gt;&lt;code class=&quot;language-rust&quot; data-lang=&quot;rust&quot;&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;pub enum &lt;&#x2F;span&gt;&lt;span&gt;GcRecord {
+&lt;&#x2F;span&gt;&lt;span&gt;    ClassDump {
+&lt;&#x2F;span&gt;&lt;span&gt;        class_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        stack_trace_serial_number: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        super_class_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        class_loader_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        signers_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        protection_domain_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        instance_size: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        constant_pool_size: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u16&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        const_fields: Vec&amp;lt;(ConstFieldInfo, FieldValue)&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        static_fields: Vec&amp;lt;(FieldInfo, FieldValue)&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        instance_fields: Vec&amp;lt;FieldInfo&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    }
+&lt;&#x2F;span&gt;&lt;span&gt;    ...
+&lt;&#x2F;span&gt;&lt;span&gt;}   
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;The &lt;code&gt;Vector&lt;&#x2F;code&gt; type contains three words: a length, a capacity, and a pointer. That is 3 * 8 = 24 bytes on a 64-bits architecture.&lt;&#x2F;p&gt;
+&lt;p&gt;Boxing each vector would save 16 bytes per field.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;rust&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-rust &quot;&gt;&lt;code class=&quot;language-rust&quot; data-lang=&quot;rust&quot;&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;pub enum &lt;&#x2F;span&gt;&lt;span&gt;GcRecord {
+&lt;&#x2F;span&gt;&lt;span&gt;    ClassDump {
+&lt;&#x2F;span&gt;&lt;span&gt;        class_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        stack_trace_serial_number: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        super_class_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        class_loader_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        signers_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        protection_domain_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        instance_size: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        constant_pool_size: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u16&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        const_fields: Box&amp;lt;Vec&amp;lt;(ConstFieldInfo, FieldValue)&amp;gt;&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        static_fields: Box&amp;lt;Vec&amp;lt;(FieldInfo, FieldValue)&amp;gt;&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        instance_fields: Box&amp;lt;Vec&amp;lt;FieldInfo&amp;gt;&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    }
+&lt;&#x2F;span&gt;&lt;span&gt;    ...
+&lt;&#x2F;span&gt;&lt;span&gt;}    
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Fetching the new type&#x27;s size yields the following:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt; type: `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;parser::gc_record::GcRecord&lt;&#x2F;span&gt;&lt;span&gt;`: 80 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     discriminant: 1 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     variant `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;ClassDump&lt;&#x2F;span&gt;&lt;span&gt;`: 79 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 1 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.constant_pool_size&lt;&#x2F;span&gt;&lt;span&gt;`: 2 bytes, alignment: 2 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.stack_trace_serial_number&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.instance_size&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.class_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.super_class_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.class_loader_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.signers_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.protection_domain_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.const_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.static_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.instance_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;This is exactly what we were expecting; one word per boxed field.&lt;&#x2F;p&gt;
+&lt;p&gt;But we have learned the hard way not to celebrate prematurely before checking how it pans out in a benchmark.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;hyperfine --runs&lt;&#x2F;span&gt;&lt;span&gt; 3 \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; --export-markdown&lt;&#x2F;span&gt;&lt;span&gt; hprof.md \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.3.3 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.3.3 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; boxes &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th align=&quot;left&quot;&gt;Command&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Mean [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Min [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Max [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Relative&lt;&#x2F;th&gt;&lt;&#x2F;tr&gt;&lt;&#x2F;thead&gt;&lt;tbody&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.3.3&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;76.691 ± 3.326&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;73.080&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;79.629&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.12 ± 0.05&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;boxes&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;68.625 ± 1.262&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;67.202&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;69.605&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.00&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;&#x2F;tbody&gt;&lt;&#x2F;table&gt;
+&lt;p&gt;It runs 12% faster. Not bad for such a small change!&lt;&#x2F;p&gt;
+&lt;p&gt;But let&#x27;s try to go faster by reducing the size of the &lt;code&gt;ClassDump&lt;&#x2F;code&gt; variant even more.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;rust&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-rust &quot;&gt;&lt;code class=&quot;language-rust&quot; data-lang=&quot;rust&quot;&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;pub struct &lt;&#x2F;span&gt;&lt;span&gt;ClassDumpFields {
+&lt;&#x2F;span&gt;&lt;span&gt;    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;const_fields&lt;&#x2F;span&gt;&lt;span&gt;: Vec&amp;lt;(ConstFieldInfo, FieldValue)&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;static_fields&lt;&#x2F;span&gt;&lt;span&gt;: Vec&amp;lt;(FieldInfo, FieldValue)&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;instance_fields&lt;&#x2F;span&gt;&lt;span&gt;: Vec&amp;lt;FieldInfo&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;}
+&lt;&#x2F;span&gt;&lt;span&gt;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;pub enum &lt;&#x2F;span&gt;&lt;span&gt;GcRecord {
+&lt;&#x2F;span&gt;&lt;span&gt;    ClassDump {
+&lt;&#x2F;span&gt;&lt;span&gt;        class_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        stack_trace_serial_number: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        super_class_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        class_loader_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        signers_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        protection_domain_object_id: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u64&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        instance_size: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u32&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        constant_pool_size: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;u16&lt;&#x2F;span&gt;&lt;span&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;        fields: Box&amp;lt;ClassDumpFields&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    }
+&lt;&#x2F;span&gt;&lt;span&gt;    ...
+&lt;&#x2F;span&gt;&lt;span&gt;}    
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Which has the following type size:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt; type: `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;parser::gc_record::ClassDumpFields&lt;&#x2F;span&gt;&lt;span&gt;`: 72 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.const_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.static_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.instance_fields&lt;&#x2F;span&gt;&lt;span&gt;`: 24 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;...
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt; type: `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;parser::gc_record::GcRecord&lt;&#x2F;span&gt;&lt;span&gt;`: 64 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     discriminant: 1 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;     variant `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;ClassDump&lt;&#x2F;span&gt;&lt;span&gt;`: 63 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 1 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.constant_pool_size&lt;&#x2F;span&gt;&lt;span&gt;`: 2 bytes, alignment: 2 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.stack_trace_serial_number&lt;&#x2F;span&gt;&lt;span&gt;`: 4 ytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.instance_size&lt;&#x2F;span&gt;&lt;span&gt;`: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         padding: 4 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.class_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes, alignment: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.super_class_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.class_loader_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.signers_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.protection_domain_object_id&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;print-type-size&lt;&#x2F;span&gt;&lt;span&gt;         field `&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.fields&lt;&#x2F;span&gt;&lt;span&gt;`: 8 bytes
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We shaved off 16 more bytes.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;hyperfine --runs&lt;&#x2F;span&gt;&lt;span&gt; 3 \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; --export-markdown&lt;&#x2F;span&gt;&lt;span&gt; hprof.md \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.3.3 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.3.3 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; boxes &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-boxes -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; box-struct &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th align=&quot;left&quot;&gt;Command&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Mean [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Min [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Max [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Relative&lt;&#x2F;th&gt;&lt;&#x2F;tr&gt;&lt;&#x2F;thead&gt;&lt;tbody&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.3.3&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;75.638 ± 4.154&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;70.900&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;78.660&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.15 ± 0.06&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;boxes&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;68.621 ± 0.399&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;68.194&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;68.986&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.04 ± 0.01&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;box-struct&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;65.978 ± 0.185&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;65.764&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;66.086&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.00&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;&#x2F;tbody&gt;&lt;&#x2F;table&gt;
+&lt;p&gt;This last change gave us an extra 4% which is quite nice.&lt;&#x2F;p&gt;
+&lt;p&gt;To go further, one would need to remove unnecessary fields from the &lt;code&gt;ClassDump&lt;&#x2F;code&gt; variant.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;clippy&quot;&gt;Clippy&lt;&#x2F;h2&gt;
+&lt;p&gt;Before wrapping up this article, it is mandatory to note that Clippy has a lint for this class of problems, which I, &lt;strong&gt;of course&lt;&#x2F;strong&gt; discovered only much later.&lt;&#x2F;p&gt;
+&lt;p&gt;It is called &lt;a href=&quot;https:&#x2F;&#x2F;rust-lang.github.io&#x2F;rust-clippy&#x2F;master&#x2F;index.html#large_enum_variant&quot;&gt;large_enum_variant&lt;&#x2F;a&gt; and kicks in when the difference between the largest variant and the smallest variant is larger than 200 bytes.&lt;&#x2F;p&gt;
+&lt;p&gt;The documentation warns us about something very important that we discovered as well.&lt;&#x2F;p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;This lint obviously cannot take the distribution of variants in your running program into account. It is possible that the smaller variants make up less than 1% of all instances, in which case the overhead is negligible and the boxing is counter-productive. Always measure the change this lint suggests.&lt;&#x2F;p&gt;
+&lt;&#x2F;blockquote&gt;
+&lt;p&gt;Let&#x27;s give this lint a try by creating a &lt;code&gt;clippy.toml&lt;&#x2F;code&gt; file in the project and configuring this lint to be more aggressive with:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;enum-variant-size-threshold&lt;&#x2F;span&gt;&lt;span&gt; = 100 &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;# instead of the default value 200
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Running &lt;code&gt;cargo clippy&lt;&#x2F;code&gt; yields two entries:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;warning:&lt;&#x2F;span&gt;&lt;span&gt; large size difference between variants
+&lt;&#x2F;span&gt;&lt;span&gt;  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;--&lt;&#x2F;span&gt;&lt;span&gt;&amp;gt; src&#x2F;parser&#x2F;record.rs:97:5
+&lt;&#x2F;span&gt;&lt;span&gt;   |
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;97 &lt;&#x2F;span&gt;&lt;span&gt;|     &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;GcSegment&lt;&#x2F;span&gt;&lt;span&gt;(GcRecord)&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;   |     &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;^^^^^^^^^^^^^^^^^^^&lt;&#x2F;span&gt;&lt;span&gt; this variant is 128 bytes
+&lt;&#x2F;span&gt;&lt;span&gt;   |
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;note:&lt;&#x2F;span&gt;&lt;span&gt; and the second-largest variant is 58 bytes:
+&lt;&#x2F;span&gt;&lt;span&gt;  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;--&lt;&#x2F;span&gt;&lt;span&gt;&amp;gt; src&#x2F;parser&#x2F;record.rs:55:5
+&lt;&#x2F;span&gt;&lt;span&gt;   |
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;55 &lt;&#x2F;span&gt;&lt;span&gt;| &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;&#x2F;&lt;&#x2F;span&gt;&lt;span&gt;     AllocationSites {
+&lt;&#x2F;span&gt;&lt;span&gt;56 | |         flags: u16,
+&lt;&#x2F;span&gt;&lt;span&gt;57 | |         cutoff_ratio: u32,
+&lt;&#x2F;span&gt;&lt;span&gt;58 | |         total_live_bytes: u32,
+&lt;&#x2F;span&gt;&lt;span&gt;...  |
+&lt;&#x2F;span&gt;&lt;span&gt;63 | |         allocation_sites: Vec&amp;lt;AllocationSite&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;64 | |     },
+&lt;&#x2F;span&gt;&lt;span&gt;   | |&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;_____^
+&lt;&#x2F;span&gt;&lt;span&gt;   = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;help:&lt;&#x2F;span&gt;&lt;span&gt; for further information visit https:&#x2F;&#x2F;rust-lang.github.io&#x2F;rust-clippy&#x2F;master&#x2F;index.html#large_enum_variant
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;help:&lt;&#x2F;span&gt;&lt;span&gt; consider boxing the large fields to reduce the total size of the enum
+&lt;&#x2F;span&gt;&lt;span&gt;   |
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;97 &lt;&#x2F;span&gt;&lt;span&gt;|     &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;GcSegment&lt;&#x2F;span&gt;&lt;span&gt;(Box&amp;lt;GcRecord&amp;gt;)&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;   |  
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We tried this already and it did not work. Clippy tries its best, but remember, it cannot know about the distribution of variants through a static analysis.&lt;&#x2F;p&gt;
+&lt;p&gt;And the second entry:&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;warning:&lt;&#x2F;span&gt;&lt;span&gt; large size difference between variants
+&lt;&#x2F;span&gt;&lt;span&gt;   &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;--&lt;&#x2F;span&gt;&lt;span&gt;&amp;gt; src&#x2F;parser&#x2F;gc_record.rs:127:5
+&lt;&#x2F;span&gt;&lt;span&gt;    |
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;127 &lt;&#x2F;span&gt;&lt;span&gt;| &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;&#x2F;&lt;&#x2F;span&gt;&lt;span&gt;     ClassDump {
+&lt;&#x2F;span&gt;&lt;span&gt;128 | |         class_object_id: u64,
+&lt;&#x2F;span&gt;&lt;span&gt;129 | |         stack_trace_serial_number: u32,
+&lt;&#x2F;span&gt;&lt;span&gt;130 | |         super_class_object_id: u64,
+&lt;&#x2F;span&gt;&lt;span&gt;...   |
+&lt;&#x2F;span&gt;&lt;span&gt;138 | |         instance_fields: Vec&amp;lt;FieldInfo&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;139 | |     },
+&lt;&#x2F;span&gt;&lt;span&gt;    | |&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;_____^&lt;&#x2F;span&gt;&lt;span&gt; this variant is 122 bytes
+&lt;&#x2F;span&gt;&lt;span&gt;    |
+&lt;&#x2F;span&gt;&lt;span&gt;    = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;note: &lt;&#x2F;span&gt;&lt;span&gt;`&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;#[warn&lt;&#x2F;span&gt;&lt;span&gt;(clippy::large_enum_variant)&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;]&lt;&#x2F;span&gt;&lt;span&gt;` on by default
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;note:&lt;&#x2F;span&gt;&lt;span&gt; and the second-largest variant is 49 bytes:
+&lt;&#x2F;span&gt;&lt;span&gt;   &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;--&lt;&#x2F;span&gt;&lt;span&gt;&amp;gt; src&#x2F;parser&#x2F;gc_record.rs:120:5
+&lt;&#x2F;span&gt;&lt;span&gt;    |
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;120 &lt;&#x2F;span&gt;&lt;span&gt;| &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;&#x2F;&lt;&#x2F;span&gt;&lt;span&gt;     PrimitiveArrayDump {
+&lt;&#x2F;span&gt;&lt;span&gt;121 | |         object_id: u64,
+&lt;&#x2F;span&gt;&lt;span&gt;122 | |         stack_trace_serial_number: u32,
+&lt;&#x2F;span&gt;&lt;span&gt;123 | |         number_of_elements: u32,
+&lt;&#x2F;span&gt;&lt;span&gt;124 | |         element_type: FieldType,
+&lt;&#x2F;span&gt;&lt;span&gt;125 | |         array_value: ArrayValue,
+&lt;&#x2F;span&gt;&lt;span&gt;126 | |     },
+&lt;&#x2F;span&gt;&lt;span&gt;    | |&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;_____^
+&lt;&#x2F;span&gt;&lt;span&gt;    = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;help:&lt;&#x2F;span&gt;&lt;span&gt; for further information visit https:&#x2F;&#x2F;rust-lang.github.io&#x2F;rust-clippy&#x2F;master&#x2F;index.html#large_enum_variant
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;help:&lt;&#x2F;span&gt;&lt;span&gt; consider boxing the large fields to reduce the total size of the enum
+&lt;&#x2F;span&gt;&lt;span&gt;    |
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;138 &lt;&#x2F;span&gt;&lt;span&gt;|         &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;instance_fields:&lt;&#x2F;span&gt;&lt;span&gt; Box&amp;lt;Vec&amp;lt;FieldInfo&amp;gt;&amp;gt;,
+&lt;&#x2F;span&gt;&lt;span&gt;    |                          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;~~~~~~~~~~~~~~~~~~~
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Which is the lead we ended up exploring as well.&lt;&#x2F;p&gt;
+&lt;p&gt;Sometimes the best way to learn is to rediscover what everyone already knows for yourself.&lt;&#x2F;p&gt;
+&lt;p&gt;Clippy is truly a fantastic tool and one of my personal favorite in the whole Rust ecosystem. Depending on your context, it may make sense to configure custom values for certain lints to get the most out of it.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;conclusion&quot;&gt;Conclusion&lt;&#x2F;h2&gt;
+&lt;p&gt;This article has presented a bottleneck due to excessive &lt;code&gt;memcopy&lt;&#x2F;code&gt; which was slowing down &lt;code&gt;hprof-slurp&lt;&#x2F;code&gt; prior to the 0.4.0 release.&lt;&#x2F;p&gt;
+&lt;p&gt;The final fix took only a few lines of code but had a &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;agourlay&#x2F;hprof-slurp&#x2F;commit&#x2F;73392f1210c09a86e5dbd59629b6ed0302a05dfc&quot;&gt;strong&lt;&#x2F;a&gt; positive effect on performance.&lt;&#x2F;p&gt;
+&lt;p&gt;In order to get there, we had to understand a few details regarding the way Rust sizes types internally, more specifically enumerations.&lt;&#x2F;p&gt;
+&lt;p&gt;As a rule of thumb, it is recommended to avoid single outsized variant when creating enumerations as it impacts the memory usage of all variants.&lt;&#x2F;p&gt;
+&lt;p&gt;One also must be careful when trying to reduce the stack memory pressure via boxing. Allocating on the heap is not magic and its cost must be understood in the context of the application.&lt;&#x2F;p&gt;
+&lt;p&gt;The next article in this series will go through another interesting optimization encountered while making &lt;code&gt;hprof-slurp&lt;&#x2F;code&gt; faster.&lt;&#x2F;p&gt;
+</content>
+	</entry>
+	<entry xml:lang="en">
+		<title>A performance retrospective using Rust (part 1)</title>
+		<published>2022-07-11T00:00:00+00:00</published>
+		<updated>2022-07-11T00:00:00+00:00</updated>
+		<link href=" https://agourlay.github.io/rust-performance-retrospective-part1/" type="text/html"/>
+		<id> https://agourlay.github.io/rust-performance-retrospective-part1/</id>
+		<content type="html">&lt;p&gt;This is the first article in a series regarding making a simple JVM heap dump analyzer in Rust faster over time.&lt;&#x2F;p&gt;
+&lt;p&gt;Although it is primarily targeted at intermediate Rust developers, it will surely be relevant for engineers interested in performance in general.&lt;&#x2F;p&gt;
+&lt;p&gt;Performance optimization is highly context-dependent so it makes sense to spend some time explaining what problem we are trying to solve.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;context&quot;&gt;Context&lt;&#x2F;h2&gt;
+&lt;p&gt;In a previous life, I found myself needing to analyze large JVM heap dumps. For a sense of scale, &amp;quot;large&amp;quot; stands for more than 50Gb in that context.&lt;&#x2F;p&gt;
+&lt;p&gt;The JVM ecosystem is pretty rich in terms of tooling regarding heap dump analysis. Most JVM developers are familiar with &lt;a href=&quot;https:&#x2F;&#x2F;visualvm.github.io&#x2F;&quot;&gt;VisualVM&lt;&#x2F;a&gt; and &lt;a href=&quot;https:&#x2F;&#x2F;www.eclipse.org&#x2F;mat&#x2F;&quot;&gt;EclipseMat&lt;&#x2F;a&gt;.&lt;&#x2F;p&gt;
+&lt;p&gt;Those tools are truly excellent; they offer a large panel of &lt;a href=&quot;https:&#x2F;&#x2F;eclipsesource.com&#x2F;blogs&#x2F;2013&#x2F;01&#x2F;21&#x2F;10-tips-for-using-the-eclipse-memory-analyzer&#x2F;&quot;&gt;features&lt;&#x2F;a&gt; to drill down on the content of heap dumps to help you pin point your issue very precisely.&lt;&#x2F;p&gt;
+&lt;p&gt;However, they tend to be extremely memory hungry and slow when analyzing large files, which is forcing users to spin up expensive beefy instance from a cloud provider to get the job done.&lt;&#x2F;p&gt;
+&lt;p&gt;The tool I needed was fairly specific, my main concern was to get a quick overview of large heap dumps using a regular developer machine to decide if it actually makes sense to investigate further using the aforementioned workflow.&lt;&#x2F;p&gt;
+&lt;p&gt;The goal is not to replace the existing tooling but to optimize the investigation workflow and this led me to create the &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;agourlay&#x2F;hprof-slurp&quot;&gt;hprof-slurp&lt;&#x2F;a&gt; project.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;hprof-slurp&quot;&gt;Hprof-slurp&lt;&#x2F;h2&gt;
+&lt;p&gt;The project is a CLI written in Rust which processes dump files in a streaming fashion.&lt;&#x2F;p&gt;
+&lt;p&gt;It trades off features for speed by performing only a single pass without storing intermediary results on the host, which reduces the depth of the analysis possible.&lt;&#x2F;p&gt;
+&lt;p&gt;The project is named after the &lt;a href=&quot;https:&#x2F;&#x2F;docs.oracle.com&#x2F;javase&#x2F;8&#x2F;docs&#x2F;technotes&#x2F;samples&#x2F;hprof.html&quot;&gt;hprof&lt;&#x2F;a&gt; format which is used by the JDK to encode heap dumps.&lt;&#x2F;p&gt;
+&lt;p&gt;The 3 main features available are:&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;report top &lt;code&gt;k&lt;&#x2F;code&gt; allocated classes.&lt;&#x2F;li&gt;
+&lt;li&gt;report the count of instances per class.&lt;&#x2F;li&gt;
+&lt;li&gt;report the largest instance size per class.&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;Let&#x27;s have a look at an example of output processing: a &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;agourlay&#x2F;hprof-slurp&#x2F;tree&#x2F;master&#x2F;test-heap-dumps&quot;&gt;tiny heap dump&lt;&#x2F;a&gt; which is used as part of the integration test pipeline.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;du -BM&lt;&#x2F;span&gt;&lt;span&gt; hprof-64.bin 
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;2M&lt;&#x2F;span&gt;&lt;span&gt; hprof-64.bin
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Let&#x27;s process that 2Mb heap dump!&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.&#x2F;hprof-slurp -i &lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;hprof-64.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Which instaneously yields those two tables&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;textile&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-textile &quot;&gt;&lt;code class=&quot;language-textile&quot; data-lang=&quot;textile&quot;&gt;&lt;span&gt;Top 20 allocated classes:
+&lt;&#x2F;span&gt;&lt;span&gt;
+&lt;&#x2F;span&gt;&lt;span&gt;Total size | Instances |     Largest | Class name                                  
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;------------------------------------------------------------------------------------
+&lt;&#x2F;span&gt;&lt;span&gt;   1.99MiB |       436 |   634.78KiB | int[]
+&lt;&#x2F;span&gt;&lt;span&gt; 197.11KiB |      1991 |    16.02KiB | char[]
+&lt;&#x2F;span&gt;&lt;span&gt;  85.25KiB |       443 |     8.02KiB | byte[]
+&lt;&#x2F;span&gt;&lt;span&gt;  47.38KiB |      1516 |  32.00bytes | java&#x2F;lang&#x2F;String
+&lt;&#x2F;span&gt;&lt;span&gt;  45.42KiB |       560 |     8.02KiB | java&#x2F;lang&#x2F;Object[]
+&lt;&#x2F;span&gt;&lt;span&gt;  15.26KiB |       126 | 124.00bytes | java&#x2F;lang&#x2F;reflect&#x2F;Field
+&lt;&#x2F;span&gt;&lt;span&gt;  14.77KiB |       378 |  40.00bytes | java&#x2F;util&#x2F;LinkedList$Node
+&lt;&#x2F;span&gt;&lt;span&gt;   9.94KiB |       212 |  48.00bytes | java&#x2F;util&#x2F;HashMap$Node
+&lt;&#x2F;span&gt;&lt;span&gt;   8.91KiB |       190 |  48.00bytes | java&#x2F;util&#x2F;LinkedList
+&lt;&#x2F;span&gt;&lt;span&gt;   8.42KiB |        98 |  88.00bytes | java&#x2F;lang&#x2F;ref&#x2F;SoftReference
+&lt;&#x2F;span&gt;&lt;span&gt;   6.05KiB |       258 |  24.00bytes | java&#x2F;lang&#x2F;Integer
+&lt;&#x2F;span&gt;&lt;span&gt;   5.91KiB |        18 |     2.02KiB | java&#x2F;util&#x2F;HashMap$Node[]
+&lt;&#x2F;span&gt;&lt;span&gt;   5.86KiB |       150 |  40.00bytes | java&#x2F;lang&#x2F;StringBuilder
+&lt;&#x2F;span&gt;&lt;span&gt;   5.44KiB |       116 |  48.00bytes | java&#x2F;util&#x2F;Hashtable$Entry
+&lt;&#x2F;span&gt;&lt;span&gt;   5.05KiB |        38 | 136.00bytes | sun&#x2F;util&#x2F;locale&#x2F;LocaleObjectCache$CacheEntry
+&lt;&#x2F;span&gt;&lt;span&gt;   5.00KiB |        40 | 128.00bytes | java&#x2F;lang&#x2F;ref&#x2F;Finalizer
+&lt;&#x2F;span&gt;&lt;span&gt;   3.50KiB |        32 | 112.00bytes | java&#x2F;net&#x2F;URL
+&lt;&#x2F;span&gt;&lt;span&gt;   3.42KiB |        73 |  48.00bytes | java&#x2F;io&#x2F;File
+&lt;&#x2F;span&gt;&lt;span&gt;   3.17KiB |        12 | 776.00bytes | java&#x2F;util&#x2F;Hashtable$Entry[]
+&lt;&#x2F;span&gt;&lt;span&gt;   3.13KiB |        56 | 144.00bytes | java&#x2F;lang&#x2F;String[]
+&lt;&#x2F;span&gt;&lt;span&gt;
+&lt;&#x2F;span&gt;&lt;span&gt;Top 20 largest instances:
+&lt;&#x2F;span&gt;&lt;span&gt;
+&lt;&#x2F;span&gt;&lt;span&gt; Total size | Instances |     Largest | Class name                                   
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;------------------------------------------------------------------------------------&lt;&#x2F;span&gt;&lt;span&gt;--
+&lt;&#x2F;span&gt;&lt;span&gt;    1.99MiB |       436 |   634.78KiB | int[]
+&lt;&#x2F;span&gt;&lt;span&gt;  197.11KiB |      1991 |    16.02KiB | char[]
+&lt;&#x2F;span&gt;&lt;span&gt;   85.25KiB |       443 |     8.02KiB | byte[]
+&lt;&#x2F;span&gt;&lt;span&gt;   45.42KiB |       560 |     8.02KiB | java&#x2F;lang&#x2F;Object[]
+&lt;&#x2F;span&gt;&lt;span&gt;    5.91KiB |        18 |     2.02KiB | java&#x2F;util&#x2F;HashMap$Node[]
+&lt;&#x2F;span&gt;&lt;span&gt;    2.05KiB |         2 |     2.02KiB | java&#x2F;lang&#x2F;invoke&#x2F;MethodHandle[]
+&lt;&#x2F;span&gt;&lt;span&gt;    2.02KiB |         1 |     2.02KiB | java&#x2F;lang&#x2F;Integer[]
+&lt;&#x2F;span&gt;&lt;span&gt;    3.17KiB |        12 | 776.00bytes | java&#x2F;util&#x2F;Hashtable$Entry[]
+&lt;&#x2F;span&gt;&lt;span&gt;462.00bytes |         1 | 462.00bytes | sun&#x2F;misc&#x2F;Launcher$AppClassLoader
+&lt;&#x2F;span&gt;&lt;span&gt;454.00bytes |         1 | 454.00bytes | sun&#x2F;misc&#x2F;Launcher$ExtClassLoader
+&lt;&#x2F;span&gt;&lt;span&gt;680.00bytes |         2 | 340.00bytes | simple&#x2F;Producer
+&lt;&#x2F;span&gt;&lt;span&gt;680.00bytes |         2 | 340.00bytes | simple&#x2F;Consumer
+&lt;&#x2F;span&gt;&lt;span&gt;    2.30KiB |         7 | 336.00bytes | java&#x2F;util&#x2F;jar&#x2F;JarFile$JarFileEntry
+&lt;&#x2F;span&gt;&lt;span&gt;334.00bytes |         1 | 334.00bytes | java&#x2F;lang&#x2F;ref&#x2F;Finalizer$FinalizerThread
+&lt;&#x2F;span&gt;&lt;span&gt;332.00bytes |         1 | 332.00bytes | java&#x2F;lang&#x2F;ref&#x2F;Reference$ReferenceHandler
+&lt;&#x2F;span&gt;&lt;span&gt;    1.01KiB |         9 | 312.00bytes | java&#x2F;lang&#x2F;reflect&#x2F;Field[]
+&lt;&#x2F;span&gt;&lt;span&gt;    1.48KiB |         7 | 272.00bytes | java&#x2F;util&#x2F;concurrent&#x2F;ConcurrentHashMap$Node[]
+&lt;&#x2F;span&gt;&lt;span&gt;236.00bytes |         1 | 236.00bytes | sun&#x2F;net&#x2F;www&#x2F;protocol&#x2F;file&#x2F;FileURLConnection
+&lt;&#x2F;span&gt;&lt;span&gt;440.00bytes |         2 | 220.00bytes | java&#x2F;io&#x2F;ExpiringCache$1
+&lt;&#x2F;span&gt;&lt;span&gt;432.00bytes |         2 | 216.00bytes | java&#x2F;lang&#x2F;NoSuchMethodError
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;And that&#x27;s all there is to it.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;architecture&quot;&gt;Architecture&lt;&#x2F;h2&gt;
+&lt;p&gt;As mentioned previously, the CLI is written in Rust and works in a synchronous multithreaded fashion.&lt;&#x2F;p&gt;
+&lt;p&gt;Here is a simplified architecture diagram for the current version (0.4.7).&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;img src=&quot;&#x2F;2022-07-11&#x2F;architecture.png&quot; alt=&quot;image info&quot; &#x2F;&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;The various threads are wired up together via channels to form a processing pipeline where all stages run in parallel (if the host has enough cores).&lt;&#x2F;p&gt;
+&lt;p&gt;The file reader thread pro-actively loads chunks of 64Mb from the input file to not starve the rest of the pipeline while waiting for IO. Loading too many chunks in advance has a direct impact on the memory usage, so I settled on 3 chunks based on experiments.&lt;&#x2F;p&gt;
+&lt;p&gt;Those chunks are then sent over to the streaming parser which was the most challenging work of the project because it must handle incomplete inputs.
+A single chunk can contain millions of records, and a chunk is of course not aligned on the actual boundary of the &lt;code&gt;hprof&lt;&#x2F;code&gt; records.&lt;&#x2F;p&gt;
+&lt;p&gt;Therefore, the parser tries to make sense of the incoming binary data while carefully managing its inner buffer.&lt;&#x2F;p&gt;
+&lt;p&gt;More concretely, it has been written by following the &lt;a href=&quot;https:&#x2F;&#x2F;hg.openjdk.java.net&#x2F;jdk&#x2F;jdk&#x2F;file&#x2F;ee1d592a9f53&#x2F;src&#x2F;hotspot&#x2F;share&#x2F;services&#x2F;heapDumper.cpp#l62&quot;&gt;full specification of the hprof format&lt;&#x2F;a&gt; found in the heap dumper code of the JDK.&lt;&#x2F;p&gt;
+&lt;p&gt;The parser itself is written with the &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;Geal&#x2F;nom&quot;&gt;nom&lt;&#x2F;a&gt; library, which I found a real pleasure to work with due to its support for parsing incomplete data.&lt;&#x2F;p&gt;
+&lt;p&gt;As the content of the file is streamed through the parser, the classes information is extracted and forwarded to the statistics recorder thread which keeps track of the instance counts in order to later compute the heavy hitters.&lt;&#x2F;p&gt;
+&lt;p&gt;Spoiler alert: as of version 0.4.7, the performance bottleneck is the parsing thread.&lt;&#x2F;p&gt;
+&lt;p&gt;Speeding up other stages of the pipelines would not yield any performance improvements.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;test-data&quot;&gt;Test data&lt;&#x2F;h2&gt;
+&lt;p&gt;We are about to do some performance testing, which means we need some meaningful test data.&lt;&#x2F;p&gt;
+&lt;p&gt;For the sake of transparency or reproducibility, I will show you exactly how to generate a similar heap dump.&lt;&#x2F;p&gt;
+&lt;p&gt;To avoid completely synthetic data, we will be using &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;spring-petclinic&#x2F;spring-petclinic-rest&quot;&gt;Spring&#x27;s REST petclinic&lt;&#x2F;a&gt;.&lt;&#x2F;p&gt;
+&lt;p&gt;It is a reasonable choice because it is relatively well known and it uses an in-memory database by default which naturally amplifies the memory usage.&lt;&#x2F;p&gt;
+&lt;p&gt;In order to not waste too much time growing the heap, we will simply use the Java &lt;a href=&quot;https:&#x2F;&#x2F;blogs.oracle.com&#x2F;javamagazine&#x2F;post&#x2F;epsilon-the-jdks-do-nothing-garbage-collector&quot;&gt;Epsilon GC&lt;&#x2F;a&gt; which does not cleanup anything.&lt;&#x2F;p&gt;
+&lt;p&gt;This is the change to apply if you want to try this at home.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;diff&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-diff &quot;&gt;&lt;code class=&quot;language-diff&quot; data-lang=&quot;diff&quot;&gt;&lt;span&gt;git diff
+&lt;&#x2F;span&gt;&lt;span&gt;diff --git a&#x2F;pom.xml b&#x2F;pom.xml
+&lt;&#x2F;span&gt;&lt;span&gt;index b936a37..7621eb9 100644
+&lt;&#x2F;span&gt;&lt;span&gt;--- a&#x2F;pom.xml
+&lt;&#x2F;span&gt;&lt;span&gt;+++ b&#x2F;pom.xml
+&lt;&#x2F;span&gt;&lt;span&gt;@@ -165,6 +165,15 @@
+&lt;&#x2F;span&gt;&lt;span&gt;             &amp;lt;plugin&amp;gt;
+&lt;&#x2F;span&gt;&lt;span&gt;                 &amp;lt;groupId&amp;gt;org.springframework.boot&amp;lt;&#x2F;groupId&amp;gt;
+&lt;&#x2F;span&gt;&lt;span&gt;                 &amp;lt;artifactId&amp;gt;spring-boot-maven-plugin&amp;lt;&#x2F;artifactId&amp;gt;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;+                &amp;lt;configuration&amp;gt;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;+                    &amp;lt;executable&amp;gt;true&amp;lt;&#x2F;executable&amp;gt;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;+                    &amp;lt;jvmArguments&amp;gt;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;+                        -Xmx32g
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;+                        -XX:+UnlockExperimentalVMOptions
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;+                        -XX:+UseEpsilonGC
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;+                    &amp;lt;&#x2F;jvmArguments&amp;gt;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;+                &amp;lt;&#x2F;configuration&amp;gt;
+&lt;&#x2F;span&gt;&lt;span&gt;                 &amp;lt;executions&amp;gt;
+&lt;&#x2F;span&gt;&lt;span&gt;                     &amp;lt;execution&amp;gt;
+&lt;&#x2F;span&gt;&lt;span&gt;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;You could also add &lt;code&gt;-XX:+HeapDumpOnOutOfMemoryError&lt;&#x2F;code&gt; if you prefer to produce a heap dump whenever an &lt;code&gt;OutOfMemory Error&lt;&#x2F;code&gt; is thrown instead of performing the dump manually.&lt;&#x2F;p&gt;
+&lt;p&gt;In any case we can start the application using Maven.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.&#x2F;mvnw&lt;&#x2F;span&gt;&lt;span&gt; spring-boot:run
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;In order to increase the memory pressure, we will gently hammer one of the REST endpoints using &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;rakyll&#x2F;hey&quot;&gt;Hey&lt;&#x2F;a&gt;.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;hey -m&lt;&#x2F;span&gt;&lt;span&gt; POST \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -D&lt;&#x2F;span&gt;&lt;span&gt; .&#x2F;payload-owner.json \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -T&lt;&#x2F;span&gt;&lt;span&gt; application&#x2F;json \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -A&lt;&#x2F;span&gt;&lt;span&gt; application&#x2F;json \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -z&lt;&#x2F;span&gt;&lt;span&gt; 3m \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -c&lt;&#x2F;span&gt;&lt;span&gt; 50 \
+&lt;&#x2F;span&gt;&lt;span&gt; http:&#x2F;&#x2F;127.0.0.1:9966&#x2F;petclinic&#x2F;api&#x2F;owners
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;With the following &lt;code&gt;payload-owner.json&lt;&#x2F;code&gt;&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;json&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-json &quot;&gt;&lt;code class=&quot;language-json&quot; data-lang=&quot;json&quot;&gt;&lt;span&gt;{
+&lt;&#x2F;span&gt;&lt;span&gt;  &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;address&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;: &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;110 W. Liberty St.&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;,
+&lt;&#x2F;span&gt;&lt;span&gt;  &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;city&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;: &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;Madison&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;,
+&lt;&#x2F;span&gt;&lt;span&gt;  &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;firstName&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;: &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;George&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;,
+&lt;&#x2F;span&gt;&lt;span&gt;  &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;lastName&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;: &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;Franklin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;,
+&lt;&#x2F;span&gt;&lt;span&gt;  &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;telephone&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;: &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;6085551023&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;
+&lt;&#x2F;span&gt;&lt;span&gt;}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Once the desired heap size is reached, we can generate a heap dump with &lt;code&gt;jmap&lt;&#x2F;code&gt;.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;jmap -dump&lt;&#x2F;span&gt;&lt;span&gt;:format=b,file=pets.bin &amp;lt;pid&amp;gt;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Which gives us a decent 34Gb heap dump file to play with.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;du -BM&lt;&#x2F;span&gt;&lt;span&gt; pets.bin
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;34486M&lt;&#x2F;span&gt;&lt;span&gt; pets.bin
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Let&#x27;s see what &lt;code&gt;hprof-slurp&lt;&#x2F;code&gt; has to say about it.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;.&#x2F;hprof-slurp -i &lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;pre data-lang=&quot;textile&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-textile &quot;&gt;&lt;code class=&quot;language-textile&quot; data-lang=&quot;textile&quot;&gt;&lt;span&gt;Top 20 allocated classes:
+&lt;&#x2F;span&gt;&lt;span&gt;
+&lt;&#x2F;span&gt;&lt;span&gt;Total size | Instances |     Largest | Class name                                                                                 
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;-----------------------------------------------------------------------------------------------------------------------------------
+&lt;&#x2F;span&gt;&lt;span&gt;   4.02GiB |  90184199 |   544.20KiB | byte[]
+&lt;&#x2F;span&gt;&lt;span&gt;   2.13GiB |  55748013 |   109.80KiB | java&#x2F;lang&#x2F;Object[]
+&lt;&#x2F;span&gt;&lt;span&gt;   1.72GiB |  51264762 |  36.00bytes | java&#x2F;lang&#x2F;String
+&lt;&#x2F;span&gt;&lt;span&gt;   1.57GiB |  14807226 | 114.00bytes | org&#x2F;hibernate&#x2F;validator&#x2F;internal&#x2F;engine&#x2F;path&#x2F;NodeImpl
+&lt;&#x2F;span&gt;&lt;span&gt;   1.18GiB |   8536353 | 148.00bytes | java&#x2F;nio&#x2F;HeapByteBuffer
+&lt;&#x2F;span&gt;&lt;span&gt;   1.03GiB |  18074217 |     3.75MiB | int[]
+&lt;&#x2F;span&gt;&lt;span&gt;1022.73MiB |   5765654 | 186.00bytes | java&#x2F;lang&#x2F;reflect&#x2F;Method
+&lt;&#x2F;span&gt;&lt;span&gt;1021.18MiB |  26769597 |  40.00bytes | java&#x2F;util&#x2F;ArrayList
+&lt;&#x2F;span&gt;&lt;span&gt; 896.73MiB |  21370207 |  44.00bytes | java&#x2F;lang&#x2F;StringBuilder
+&lt;&#x2F;span&gt;&lt;span&gt; 838.65MiB |   7594346 |    16.02KiB | java&#x2F;util&#x2F;HashMap$Node[]
+&lt;&#x2F;span&gt;&lt;span&gt; 744.79MiB |   5276798 | 148.00bytes | java&#x2F;nio&#x2F;StringCharBuffer
+&lt;&#x2F;span&gt;&lt;span&gt; 743.57MiB |   5340350 | 146.00bytes | java&#x2F;util&#x2F;LinkedHashMap
+&lt;&#x2F;span&gt;&lt;span&gt; 631.70MiB |   6899814 |  96.00bytes | java&#x2F;util&#x2F;regex&#x2F;Matcher
+&lt;&#x2F;span&gt;&lt;span&gt; 606.64MiB |   6490868 |  98.00bytes | org&#x2F;hibernate&#x2F;validator&#x2F;internal&#x2F;engine&#x2F;constraintvalidation&#x2F;ConstraintValidatorContextImpl
+&lt;&#x2F;span&gt;&lt;span&gt; 605.70MiB |    610435 |   128.02KiB | java&#x2F;util&#x2F;concurrent&#x2F;ConcurrentHashMap$Node[]
+&lt;&#x2F;span&gt;&lt;span&gt; 584.97MiB |  14604425 |  42.00bytes | org&#x2F;hibernate&#x2F;validator&#x2F;internal&#x2F;engine&#x2F;path&#x2F;PathImpl
+&lt;&#x2F;span&gt;&lt;span&gt; 556.55MiB |  14589693 |  40.00bytes | java&#x2F;util&#x2F;ArrayList$Itr
+&lt;&#x2F;span&gt;&lt;span&gt; 520.24MiB |   6818920 |  80.00bytes | java&#x2F;util&#x2F;HashMap
+&lt;&#x2F;span&gt;&lt;span&gt; 425.14MiB |   8330358 |    32.02KiB | char[]
+&lt;&#x2F;span&gt;&lt;span&gt; 424.89MiB |   9281863 |  48.00bytes | java&#x2F;util&#x2F;HashMap$Node
+&lt;&#x2F;span&gt;&lt;span&gt;
+&lt;&#x2F;span&gt;&lt;span&gt;Top 20 largest instances:
+&lt;&#x2F;span&gt;&lt;span&gt;
+&lt;&#x2F;span&gt;&lt;span&gt;Total size | Instances |   Largest | Class name                                                        
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;--------------------------------------------------------------------------------------------------------
+&lt;&#x2F;span&gt;&lt;span&gt;   1.03GiB |  18074217 |   3.75MiB | int[]
+&lt;&#x2F;span&gt;&lt;span&gt;   4.02GiB |  90184199 | 544.20KiB | byte[]
+&lt;&#x2F;span&gt;&lt;span&gt; 605.70MiB |    610435 | 128.02KiB | java&#x2F;util&#x2F;concurrent&#x2F;ConcurrentHashMap$Node[]
+&lt;&#x2F;span&gt;&lt;span&gt;   2.13GiB |  55748013 | 109.80KiB | java&#x2F;lang&#x2F;Object[]
+&lt;&#x2F;span&gt;&lt;span&gt; 425.14MiB |   8330358 |  32.02KiB | char[]
+&lt;&#x2F;span&gt;&lt;span&gt;  13.70MiB |    211087 |  24.02KiB | long[]
+&lt;&#x2F;span&gt;&lt;span&gt;   5.81MiB |      3456 |  16.07KiB | jdk&#x2F;internal&#x2F;org&#x2F;objectweb&#x2F;asm&#x2F;SymbolTable$Entry[]
+&lt;&#x2F;span&gt;&lt;span&gt; 314.02KiB |       159 |  16.07KiB | org&#x2F;springframework&#x2F;asm&#x2F;SymbolTable$Entry[]
+&lt;&#x2F;span&gt;&lt;span&gt; 838.65MiB |   7594346 |  16.02KiB | java&#x2F;util&#x2F;HashMap$Node[]
+&lt;&#x2F;span&gt;&lt;span&gt;  81.18MiB |   2093066 |   9.05KiB | java&#x2F;lang&#x2F;String[]
+&lt;&#x2F;span&gt;&lt;span&gt; 432.84KiB |        54 |   8.02KiB | java&#x2F;nio&#x2F;ByteBuffer[]
+&lt;&#x2F;span&gt;&lt;span&gt;  15.83KiB |         2 |   7.91KiB | java&#x2F;util&#x2F;Locale[]
+&lt;&#x2F;span&gt;&lt;span&gt;  13.94MiB |    405627 |   4.67KiB | java&#x2F;lang&#x2F;Object[]
+&lt;&#x2F;span&gt;&lt;span&gt;  30.21KiB |        12 |   4.02KiB | net&#x2F;bytebuddy&#x2F;jar&#x2F;asm&#x2F;SymbolTable$Entry[]
+&lt;&#x2F;span&gt;&lt;span&gt;  47.46MiB |    214730 |   3.01KiB | java&#x2F;lang&#x2F;reflect&#x2F;Method[]
+&lt;&#x2F;span&gt;&lt;span&gt;   4.23KiB |         6 |   2.97KiB | [[B[]
+&lt;&#x2F;span&gt;&lt;span&gt;   2.84KiB |         1 |   2.84KiB | java&#x2F;lang&#x2F;Character$UnicodeBlock[]
+&lt;&#x2F;span&gt;&lt;span&gt;   2.67KiB |         1 |   2.67KiB | jdk&#x2F;internal&#x2F;math&#x2F;FDBigInteger[]
+&lt;&#x2F;span&gt;&lt;span&gt;   4.28KiB |         2 |   2.14KiB | sun&#x2F;security&#x2F;util&#x2F;KnownOIDs[]
+&lt;&#x2F;span&gt;&lt;span&gt;   2.11KiB |         1 |   2.11KiB | org&#x2F;springframework&#x2F;boot&#x2F;web&#x2F;embedded&#x2F;tomcat&#x2F;TomcatEmbeddedContext
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;This output looks about right for an application using an in-memory database. We find the usual suspects regarding various arrays, HashMap nodes and Strings.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;performance-over-time&quot;&gt;Performance over time&lt;&#x2F;h2&gt;
+&lt;p&gt;It is often interesting to track the performance of a piece of software over time to be able to attribute gains to precise changes.&lt;&#x2F;p&gt;
+&lt;p&gt;Sometimes a single line change can have a tremendous effect, and sometimes a complete change of architecture is required to remove a bottleneck.&lt;&#x2F;p&gt;
+&lt;p&gt;Using the benchmarking tool &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;sharkdp&#x2F;hyperfine&quot;&gt;hyperfine&lt;&#x2F;a&gt; we are able to measure accurately the execution time of our CLI in a blackbox fashion.&lt;&#x2F;p&gt;
+&lt;p&gt;For reference, I will be running the benchmarks on a laptop running Linux on an Intel &lt;a href=&quot;https:&#x2F;&#x2F;www.intel.com&#x2F;content&#x2F;www&#x2F;us&#x2F;en&#x2F;products&#x2F;sku&#x2F;201896&#x2F;intel-core-i710610u-processor-8m-cache-up-to-4-90-ghz&#x2F;specifications.html&quot;&gt;i7-10610U&lt;&#x2F;a&gt; CPU.&lt;&#x2F;p&gt;
+&lt;p&gt;In this comparison analysis, we are interested in the relative speedup between releases and not the absolute durations, which are mostly a function of the dump size given a stable thoughtput.&lt;&#x2F;p&gt;
+&lt;p&gt;After downloading all the versions of &lt;code&gt;hprof-slurp&lt;&#x2F;code&gt; into the same directory, we can compare how they handle the &lt;code&gt;pets.bin&lt;&#x2F;code&gt; heap dump using the following &lt;code&gt;hyperfine&lt;&#x2F;code&gt; magic incantation.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;hyperfine --runs&lt;&#x2F;span&gt;&lt;span&gt; 3 \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; --export-markdown&lt;&#x2F;span&gt;&lt;span&gt; hprof.md \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; --export-json&lt;&#x2F;span&gt;&lt;span&gt; hprof.json \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.1.0 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.1.0 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.2.0 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.2.0 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.2.1 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.2.1 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.2.2 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.2.2 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.3.0 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.3.0 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.3.1 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.3.1 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.3.2 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.3.2 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.3.3 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.3.3 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.4.0 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.4.0 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.4.1 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.4.1 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.4.2 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.4.2 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.4.3 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.4.3 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.4.4 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.4.4 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.4.5 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.4.5 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.4.6 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.4.6 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot; \
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -n&lt;&#x2F;span&gt;&lt;span&gt; 0.4.7 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;.&#x2F;hprof-slurp-0.4.7 -i pets.bin&lt;&#x2F;span&gt;&lt;span&gt;&amp;quot;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Which - after a long time - yields the following markdown table in &lt;code&gt;hprof.md&lt;&#x2F;code&gt;.&lt;&#x2F;p&gt;
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th align=&quot;left&quot;&gt;Command&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Mean [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Min [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Max [s]&lt;&#x2F;th&gt;&lt;th align=&quot;right&quot;&gt;Relative&lt;&#x2F;th&gt;&lt;&#x2F;tr&gt;&lt;&#x2F;thead&gt;&lt;tbody&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.1.0&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;131.227 ± 4.072&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;126.660&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;134.475&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;3.83 ± 0.12&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.2.0&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;119.450 ± 0.244&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;119.206&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;119.694&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;3.49 ± 0.03&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.2.1&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;119.038 ± 0.513&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;118.452&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;119.405&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;3.47 ± 0.03&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.2.2&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;92.710 ± 0.893&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;91.685&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;93.324&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;2.71 ± 0.03&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.3.0&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;84.097 ± 0.159&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;83.953&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;84.268&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;2.45 ± 0.02&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.3.1&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;81.579 ± 0.073&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;81.497&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;81.639&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;2.38 ± 0.02&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.3.2&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;81.255 ± 0.211&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;81.028&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;81.445&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;2.37 ± 0.02&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.3.3&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;77.121 ± 0.228&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;76.937&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;77.376&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;2.25 ± 0.02&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.4.0&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;67.911 ± 0.979&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;66.826&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;68.728&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.98 ± 0.03&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.4.1&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;65.925 ± 0.344&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;65.645&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;66.309&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.92 ± 0.02&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.4.2&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;65.779 ± 0.240&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;65.602&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;66.053&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.92 ± 0.02&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.4.3&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;63.398 ± 0.104&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;63.291&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;63.499&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.85 ± 0.02&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.4.4&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;35.473 ± 0.047&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;35.444&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;35.527&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.04 ± 0.01&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.4.5&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;34.695 ± 0.302&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;34.440&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;35.028&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.01 ± 0.01&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.4.6&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;34.285 ± 0.048&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;34.254&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;34.340&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.00 ± 0.01&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;tr&gt;&lt;td align=&quot;left&quot;&gt;&lt;code&gt;0.4.7&lt;&#x2F;code&gt;&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;34.264 ± 0.289&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;34.000&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;34.574&lt;&#x2F;td&gt;&lt;td align=&quot;right&quot;&gt;1.00&lt;&#x2F;td&gt;&lt;&#x2F;tr&gt;
+&lt;&#x2F;tbody&gt;&lt;&#x2F;table&gt;
+&lt;p&gt;And using the &lt;code&gt;hprof.json&lt;&#x2F;code&gt; file and some python &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;sharkdp&#x2F;hyperfine&#x2F;tree&#x2F;master&#x2F;scripts&quot;&gt;scripts&lt;&#x2F;a&gt; we generate the following whisker graph.&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;img src=&quot;&#x2F;2022-07-11&#x2F;hprof-graph.png&quot; alt=&quot;Whisker graph&quot; &#x2F;&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;Some observations:&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;the throughput increased by almost 400%&lt;&#x2F;li&gt;
+&lt;li&gt;0.1.0 has a large variance (might be a warmup issue)&lt;&#x2F;li&gt;
+&lt;li&gt;starting from 0.4.5 the iterative improvement is minimal&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;In any case, we reached a solid 1Gb&#x2F;s throughput in the latest version given the size of our test file.&lt;&#x2F;p&gt;
+&lt;p&gt;Let&#x27;s have a look at the peak memory consumption for 0.4.7 using &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;KDE&#x2F;heaptrack&quot;&gt;Heaptrack&lt;&#x2F;a&gt;.&lt;&#x2F;p&gt;
+&lt;pre data-lang=&quot;bash&quot; style=&quot;background-color:#2b303b;color:#c0c5ce;&quot; class=&quot;language-bash &quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;heaptrack&lt;&#x2F;span&gt;&lt;span&gt; .&#x2F;hprof-slurp-0.4.7&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt; -i&lt;&#x2F;span&gt;&lt;span&gt; pets.bin
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;This opens up the UI directly after the run if it is installed.&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;img src=&quot;&#x2F;2022-07-11&#x2F;latest-heaptrack-consumed.png&quot; alt=&quot;image info&quot; &#x2F;&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;The memory usage is pretty stable; it seems we have been able to stream the whole 34 Gb file within 500Mb.&lt;&#x2F;p&gt;
+&lt;p&gt;Most of it is actually due to the various internal buffers which are used to communicate between the threads.
+Those are pre-allocated and can grow to a certain size before being shrunk to release the memory.&lt;&#x2F;p&gt;
+&lt;p&gt;One could expect a stable similar memory usage for much larger dumps unless those contain large arrays of primitives or objects which need to be parsed.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;future-work&quot;&gt;Future work&lt;&#x2F;h2&gt;
+&lt;p&gt;Obviously, I am still interested in making &lt;code&gt;hprof-slurp&lt;&#x2F;code&gt; faster — hopefully not at the expense of code readability.&lt;&#x2F;p&gt;
+&lt;p&gt;Outside of the performance concern, I believe the output could still be improved to be more useful.&lt;&#x2F;p&gt;
+&lt;p&gt;First, I would like to validate the precision of the statistics reported by comparing the output of &lt;code&gt;hprof-slurp&lt;&#x2F;code&gt; against the existing tools. My gut feeling is that the numbers are not too far off and serve as a pretty good proxy.&lt;&#x2F;p&gt;
+&lt;p&gt;Moreover, additional extractions could be performed as long as it happens in a single pass, such as rendering the complete thread stack traces at the moment of the heap dump.&lt;&#x2F;p&gt;
+&lt;p&gt;Feel free to &lt;a href=&quot;&#x2F;pages&#x2F;about&quot;&gt;reach out&lt;&#x2F;a&gt; if you have suggestions.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;conclusion&quot;&gt;Conclusion&lt;&#x2F;h2&gt;
+&lt;p&gt;This article has shown that &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;agourlay&#x2F;hprof-slurp&quot;&gt;hprof-slurp&lt;&#x2F;a&gt; has gotten faster over time and that it is now processing heap dumps at around 1Gb&#x2F;s.&lt;&#x2F;p&gt;
+&lt;p&gt;It fulfills the initial goal, which was to offer a quick overview of large heap dumps using a regular developer machine.&lt;&#x2F;p&gt;
+&lt;p&gt;The next articles in this &lt;a href=&quot;&#x2F;categories&#x2F;series&#x2F;&quot;&gt;series&lt;&#x2F;a&gt; will go through a selection of the most interesting optimizations that had the largest impact on performance.&lt;&#x2F;p&gt;
+&lt;p&gt;In the meantime, you can try to reproduce those results or, even better, analyze larger real-world heap dumps!&lt;&#x2F;p&gt;
+</content>
+	</entry>
+</feed>

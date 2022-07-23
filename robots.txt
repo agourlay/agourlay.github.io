@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap:  https://agourlay.github.io/sitemap.xml

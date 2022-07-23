@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc> https://agourlay.github.io/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/categories/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/categories/series/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/page/1/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/pages/about/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/rust-performance-retrospective-part1/</loc>
+        <lastmod>2022-07-11</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/rust-performance-retrospective-part2/</loc>
+        <lastmod>2022-07-23</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/hprof-slurp/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/performance/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/rust/</loc>
+    </url>
+</urlset>
