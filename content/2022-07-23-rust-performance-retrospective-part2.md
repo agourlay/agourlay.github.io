@@ -65,7 +65,7 @@ print-type-size         field `.allocation_sites`: 24 bytes
 
 The `parser::record::Record` is an enum which represents all possible top-level records found in an `hprof` file.
 
-The largest variant is `GcSegment` with 134 bytes, which is larger than the 128 bytes mentioned above.
+The largest variant is `GcSegment`, with 134 bytes, which is larger than the 128 bytes mentioned above.
 
 The corresponding Rust code looks like the following:
 
@@ -205,7 +205,7 @@ hyperfine --runs 3 \
 | `0.3.3` | 77.442 ± 2.537 | 74.513 | 78.968 | 1.00 |
 | `box` | 270.785 ± 0.907 | 270.031 | 271.792 | 3.50 ± 0.12 |
 
-Ouch! It is more than three hundred percent slower!
+Ouch! It is over three hundred percent slower!
 
 Let's have a look at the flamegraph to understand where the CPU spends its time.
 
@@ -219,7 +219,7 @@ Boxing is, unfortunately, not some kind of magic sauce that will fix all our pro
 
 Performing heap allocation has a higher cost than stack allocation, and we are now performing it for each instance found in the JVM heap dump.
 
-## Reasonnable boxing
+## Reasonable boxing
 
 In the previous section, we have seen that `GcSegment` cannot be boxed efficiently because it appears too frequently during the execution of the application.
 
@@ -314,7 +314,7 @@ hyperfine --runs 3 \
 | `0.3.3` | 76.691 ± 3.326 | 73.080 | 79.629 | 1.12 ± 0.05 |
 | `boxes` | 68.625 ± 1.262 | 67.202 | 69.605 | 1.00 |
 
-It runs 12% faster. Not bad for such a small change!
+It runs 12% faster. It's not bad for such a small change!
 
 But let's try to go faster by reducing the size of the `ClassDump` variant even more.
 
@@ -381,7 +381,7 @@ hyperfine --runs 3 \
 | `boxes` | 68.621 ± 0.399 | 68.194 | 68.986 | 1.04 ± 0.01 |
 | `box-struct` | 65.978 ± 0.185 | 65.764 | 66.086 | 1.00 |
 
-This last change gave us an extra 4% which is quite nice.
+This last change gave us an extra 4%, which is quite nice.
 
 To go further, one would need to remove unnecessary fields from the `ClassDump` variant.
 
@@ -468,7 +468,7 @@ Which is the lead we ended up exploring as well.
 
 Sometimes the best way to learn is to rediscover what everyone already knows for yourself.
 
-Clippy is truly a fantastic tool and one of my personal favorite in the whole Rust ecosystem. Depending on your context, it may make sense to configure custom values for certain lints to get the most out of it.
+Clippy is truly a fantastic tool and one of my personal favorites in the whole Rust ecosystem. Depending on your context, it may make sense to configure custom values for certain lints to get the most out of them.
 
 ## Conclusion
 
@@ -476,10 +476,10 @@ This article has presented a bottleneck due to excessive `memcopy` which was slo
 
 The final fix took only a few lines of code but had a [strong](https://github.com/agourlay/hprof-slurp/commit/73392f1210c09a86e5dbd59629b6ed0302a05dfc) positive effect on performance.
 
-In order to get there, we had to understand a few details regarding the way Rust sizes types internally, more specifically enumerations.
+In order to get there, we had to understand a few details regarding the way Rust sizes types internally, more specifically, enumerations.
 
-As a rule of thumb, it is recommended to avoid single outsized variant when creating enumerations as it impacts the memory usage of all variants.
+As a rule of thumb, it is recommended to avoid single outsized variants when creating enumerations as it impacts the memory usage of all variants.
 
-One also must be careful when trying to reduce the stack memory pressure via boxing. Allocating on the heap is not magic and its cost must be understood in the context of the application.
+One also must be careful when trying to reduce the stack memory pressure via boxing. Allocating on the heap is not magic, and its cost must be understood in the context of the application.
 
 The next article in this series will go through another interesting optimization encountered while making `hprof-slurp` faster.
