@@ -3,7 +3,7 @@ title = "A performance retrospective using Rust (part 2)"
 description = "Second part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust."
 date = 2022-07-23
 [taxonomies]
-tags=["Rust", "Performance", "hprof-slurp"]
+tags=["Rust", "performance", "hprof-slurp"]
 categories=["series"]
 +++
 
