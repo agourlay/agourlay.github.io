@@ -205,7 +205,7 @@ hyperfine --runs 3 \
 | `0.3.3` | 77.442 ± 2.537 | 74.513 | 78.968 | 1.00 |
 | `box` | 270.785 ± 0.907 | 270.031 | 271.792 | 3.50 ± 0.12 |
 
-Ouch! It is over three hundred percent slower!
+Ouch! It is over three times times slower!
 
 Let's have a look at the flamegraph to understand where the CPU spends its time.
 
@@ -314,7 +314,7 @@ hyperfine --runs 3 \
 | `0.3.3` | 76.691 ± 3.326 | 73.080 | 79.629 | 1.12 ± 0.05 |
 | `boxes` | 68.625 ± 1.262 | 67.202 | 69.605 | 1.00 |
 
-It runs 12% faster. It's not bad for such a small change!
+It runs 11% faster. It's not bad for such a small change!
 
 But let's try to go faster by reducing the size of the `ClassDump` variant even more.
 

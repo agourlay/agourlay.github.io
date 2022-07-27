@@ -342,7 +342,7 @@ And using the `hprof.json` file and some python [scripts](https://github.com/sha
 
 Some observations:
 
-- the throughput increased by almost 400%
+- the throughput increased by more than 70%
 - 0.1.0 has a large variance (might be a warmup issue)
 - starting from 0.4.5 the iterative improvement is minimal
 
