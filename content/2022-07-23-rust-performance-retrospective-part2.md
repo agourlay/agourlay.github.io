@@ -482,6 +482,6 @@ As a rule of thumb, it is recommended to avoid single outsized variants when cre
 
 One also must be careful when trying to reduce the stack memory pressure via boxing. Allocating on the heap is not magic, and its cost must be understood in the context of the application.
 
-The next article in this series will go through another interesting optimization encountered while making `hprof-slurp` faster.
+The next article in this [series](/categories/series/) will go through another interesting optimization encountered while making `hprof-slurp` faster.
 
 **_Update: the article submission on [reddit/r/rust](https://www.reddit.com/r/rust/comments/w7pelk/a_performance_retrospective_using_rust_part_2/) contains excellent comments._**
