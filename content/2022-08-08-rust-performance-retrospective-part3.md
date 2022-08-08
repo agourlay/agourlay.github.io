@@ -232,7 +232,7 @@ It is more or less what we could expect from optimizing a chunk of code accounti
 
 This means it is not worth it to make a PR to upstream the performance patch as we do not have enough data to back it up with.
 
-A critical aspect of performance work is that diminishing returns can occur quickly; therefore, knowing when to stop digging in the same spot is critical.
+An important aspect of performance work is that diminishing returns can occur quickly. Therefore, knowing when to stop digging in the same spot is essential.
 
 ## Conclusion
 
