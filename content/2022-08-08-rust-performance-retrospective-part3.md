@@ -3,7 +3,7 @@ title = "A performance retrospective using Rust (part 3)"
 description = "Third part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust."
 date = 2022-08-08
 [taxonomies]
-tags=["Rust", "performance", "hprof-slurp"]
+tags=["Rust", "performance", "hprof-slurp", "try_trait"]
 categories=["series"]
 +++
 
@@ -21,7 +21,7 @@ As usual, our investigation is prompted by a strange artefact in a flamegraph.
 
 Below - in purple - you can see `core::ops::try_trait::Try>::branch` represents 8.5% of the work in the parser thread (full [flamegraph](/2022-08-08/flamegraph-try-branch.svg)).
 
-![image info](/2022-08-08/flamegraph-try-branch.png)
+![Flamegraph with try](/2022-08-08/flamegraph-try-branch.png)
 
 You should know by now that the parser thread is the bottleneck for the whole application. It needs to be as fast as possible.
 
@@ -31,13 +31,13 @@ In this case, the slowness seemed to be caused by the `Try` trait, which does no
 
 Our best chance is to simply look at the Rust doc for the [branch](https://doc.rust-lang.org/stable/core/ops/trait.Try.html#tymethod.branch) method.
 
-![image info](/2022-08-08/branch-doc.png)
+![Try::branch docs](/2022-08-08/branch-doc.png)
 
 Alright, so this function is a 'nightly-only experimental' API and is called every time the operator `?` is used on something that implements the `Try` trait.
 
 The only possible implementations when using stable Rust are found in the standard library.
 
-![image info](/2022-08-08/try-implementors.png)
+![Try implementor docs](/2022-08-08/try-implementors.png)
 
 In our case the culprit must be the `Result` type which is used to track the errors occurring during the parsing phase.
 
@@ -133,11 +133,11 @@ And a second change using `Result::map`:
 
 After applying those two changes, we can indeed see that `core::ops::try_trait::Try>::branch` now represents only 0.5% of time in a different call stack.
 
-![image info](/2022-08-08/flamegraph-after-fix.png)
+![Flamegraph after fix](/2022-08-08/flamegraph-after-fix.png)
 
 Most of it now comes from `nom::combinator::flat_map` and when zooming in we can also find a tiny contribution from `nom::combinator::map`.
 
-![image info](/2022-08-08/flamegraph-after-fix-extra.png)
+![Flamegraph after fix zoom](/2022-08-08/flamegraph-after-fix-extra.png)
 
 The previous occurence of `core::ops::try_trait::Try>::branch` has been replaced by `Result::map` which informs us that our second change is executed more often.
 
@@ -145,7 +145,7 @@ Observing flamegraphs is nice but does it translate into runtime performance gai
 
 ```bash
 hyperfine --runs 10 \
- --warmup 5
+ --warmup 5 \
  --export-markdown hprof.md \
  -n with-? "./hprof-slurp-with-? -i pets.bin" \
  -n with-combinators "./hprof-slurp-combinators -i pets.bin"
@@ -219,7 +219,7 @@ After validating that the flamegraph is now free from any traces of `branch` (tr
 
 ```bash
 hyperfine --runs 10 \
- --warmup 5
+ --warmup 5 \
  --export-markdown hprof.md \
  -n with-? "./hprof-slurp-with-? -i pets.bin" \
  -n with-combinators "./hprof-slurp-combinators -i pets.bin"

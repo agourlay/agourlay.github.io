@@ -3,7 +3,7 @@ title = "A performance retrospective using Rust (part 1)"
 description = "First part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust."
 date = 2022-07-11
 [taxonomies]
-tags=["Rust", "performance", "hprof-slurp"]
+tags=["Rust", "performance", "hprof-slurp", "benchmarking"]
 categories=["series"]
 +++
 
@@ -116,7 +116,7 @@ As mentioned previously, the CLI is written in Rust and works in a synchronous m
 
 Here is a simplified architecture diagram for the current version (0.4.7).
 
-![image info](/2022-07-11/architecture.png)
+![Architecture](/2022-07-11/architecture.png)
 
 The various threads are wired up together via channels to form a processing pipeline where all stages run in parallel (if the host has enough cores).
 
@@ -356,7 +356,7 @@ heaptrack ./hprof-slurp-0.4.7 -i pets.bin
 
 This opens up the UI directly after the run if it is installed.
 
-![image info](/2022-07-11/latest-heaptrack-consumed.png)
+![Heaptrack memory consumed](/2022-07-11/latest-heaptrack-consumed.png)
 
 The memory usage is pretty stable; it seems we have been able to stream the whole 34 Gb file within 500Mb.
 

@@ -3,7 +3,7 @@ title = "A performance retrospective using Rust (part 2)"
 description = "Second part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust."
 date = 2022-07-23
 [taxonomies]
-tags=["Rust", "performance", "hprof-slurp"]
+tags=["Rust", "performance", "hprof-slurp", "memcopy"]
 categories=["series"]
 +++
 
@@ -19,7 +19,7 @@ As the program got faster, I witnessed the `memcpy` instructions slowly creeping
 
 Below - in purple - you can see the `_memcpy_avx_unaligned_erms` representing most of the work in the parser thread (full [flamegraph](/2022-07-23/flamegraph-0.3.3.svg)).
 
-![image info](/2022-07-23/flamegraph-memcopy.png)
+![Flamegraph with memcopy](/2022-07-23/flamegraph-memcopy.png)
 
 At first, I thought it was an inherent cost of parsing large files, but as it grew to become the largest bottleneck in `hprof-slurp`, I decided to investigate the issue to - at the very least - understand it.
 
@@ -209,7 +209,7 @@ Ouch! It is over three times times slower!
 
 Let's have a look at the flamegraph to understand where the CPU spends its time.
 
-![image info](/2022-07-23/flamegraph-box.png)
+![Flamegraph with boxing](/2022-07-23/flamegraph-box.png)
 
 In purple you can see the cost of `Box::new` in the parser thread (full [flamegraph](/2022-07-23/flamegraph-box.svg) available).
 
