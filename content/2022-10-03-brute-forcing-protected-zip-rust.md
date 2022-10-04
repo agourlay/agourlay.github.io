@@ -291,7 +291,7 @@ For testing purposes, we need an archive encrypted using a password from the dic
 I am picking the entry number 1.000.000, `vaanes`, to create our encrypted test zip.
 
 ```bash
-head -1000000 xato-net-10-million-passwords.txt | tail +1000000
+sed -ne 1000000p xato-net-10-million-passwords.txt
 vaanes
 ```
 
