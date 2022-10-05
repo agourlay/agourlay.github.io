@@ -1096,3 +1096,5 @@ This fact has been very well described in this [xkcd](https://xkcd.com/936/) com
 And that's all for today, I hope you learned a thing or two on the way - thank you for making it to the end!
 
 If you want to play with the application, the full code with better error handling & proper CLI is available at [zip-password-finder](https://github.com/agourlay/zip-password-finder).
+
+**_Update: the article submission on [reddit/r/rust](https://www.reddit.com/r/rust/comments/xv94o6/brute_forcing_protected_zip_archives_in_rust/) contains excellent comments._**
