@@ -1063,13 +1063,19 @@ A simple 7 characters passwords using elements from this charset yields `62^7 = 
 
 `62^7 passwords / 4500 passwords per sec / 60 / 60 / 24 / 365 =~ 25 years`
 
+A naive brute force strategy requires much better performance to be tractable.
+
 ## Future work
 
-A naive brute force strategy requires much better performance to be tractable.
+I still have not found the password for the archive that spawned this experiment and article.
+
+However, given the current throughput, I'd have to let the program run for much longer than I am comfortable with.
 
 Fixing the scalability issue is the most important task to make this application run efficiently on machines with a higher core count.
 
 Then, improving the nominal performance per worker by investigating possible gains in the `zip.rs` crate or a different approach to get a multiplying effect.
+
+I will make sure to document my progress in a follow-up article.
 
 ## Conclusion
 
