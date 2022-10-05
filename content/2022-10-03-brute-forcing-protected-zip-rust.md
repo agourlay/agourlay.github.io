@@ -214,7 +214,10 @@ We can workaround those collisions by performing a full read of the archive with
 +               let mut buffer = Vec::with_capacity(zip.size() as usize);
 +               match zip.read_to_end(&mut buffer) {
 +                   Err(_) => (), // password collision - continue
-+                   Ok(_) => println!("Password found:{}", password),
++                   Ok(_) => {
++                       println!("Password found:{}", password);
++                       break; // stop thread
++                   }
 +               }
             }
         }
@@ -416,7 +419,9 @@ As a follow up, once the main thread receives the password, it will notify all t
                                  let mut buffer = Vec::with_capacity(zip.size() as usize);
                                  match zip.read_to_end(&mut buffer) {
                                      Err(_) => (), // password collision - continue
--                                    Ok(_) => println!("Password found:{}", password),
+-                                    Ok(_) => {
+-                                        println!("Password found:{}", password);
+-                                        break; // stop thread
 +                                    Ok(_) => {
 +                                        // Send password and continue processing while waiting for signal
 +                                        send_password_found
@@ -432,6 +437,8 @@ As a follow up, once the main thread receives the password, it will notify all t
 ```
 
 The threads can exit their looping state by probing a stop signal materialized by an `Arc<AtomicBool>` which is safe and cheap to operate.
+
+Even the worker thread which finds the password will simply wait for the signal, this way we avoid having to handle the special case where there is only a single worker.
 
 And for the wiring and actual graceful shutdown.
 
