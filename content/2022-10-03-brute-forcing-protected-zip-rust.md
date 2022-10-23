@@ -1081,7 +1081,7 @@ I will make sure to document my progress in a follow-up article.
 
 In this article we have built a simple tool in Rust to brute force the password of protected ZIP archives.
 
-It can process around 4500 passwords/sec on 4 cores machines and have issues scaling up which makes it impractical for non trivial passwords.
+It can process around 4500 passwords/sec on 4 cores machines and has issues scaling up which makes it impractical for non trivial passwords.
 
 To get there we have learned how to apply the `pool of workers` pattern and how to shut it down gracefully.
 
