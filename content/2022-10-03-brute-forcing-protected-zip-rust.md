@@ -298,6 +298,19 @@ sed -ne 1000000p xato-net-10-million-passwords.txt
 vaanes
 ```
 
+Here are the details of the test archive created using this password.
+
+```bash
+zipinfo encrypted-test-dict.zip
+
+Archive:  encrypted-test-dict.zip
+Zip file size: 202 bytes, number of entries: 1
+-rw-rw-r--  6.3 unx        9 Bx u099 22-Sep-24 12:19 test-xato
+1 file, 9 bytes uncompressed, 16 bytes compressed:  -77.8%
+```
+
+It is pretty small and uses compression as storage method.
+
 Let's run our program!
 
 ```bash
