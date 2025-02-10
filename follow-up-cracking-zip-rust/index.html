@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+
+    <title>Follow up on cracking ZIP archives in Rust</title>
+    <meta name="description" content="Yet another programming blog">
+
+    <link rel="stylesheet" href=" https://agourlay.github.io/main.css">
+
+    
+        <link rel="alternate" type="application/atom+xml" title="RSS" href=" https://agourlay.github.io/atom.xml">
+    
+
+    
+    
+</head>
+<body>
+    <a class="skip-main" href="#main">Skip to content</a>
+    <div class="container">
+        <header> 
+            <h1 class="site-header">
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io">Arnaud Gourlay&#x27;s blog</a>
+            </h1>
+            <nav>
+                
+                
+                
+                <a  href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;">Tags</a>
+                
+                
+                <a  href="&#x2F;pages&#x2F;about">About</a>
+                
+                
+            </nav>
+        </header>
+        <main id="main" tabindex="-1">
+            
+
+<article class="post">
+    <header>
+        <h1>Follow up on cracking ZIP archives in Rust</h1>
+    </header>
+    <div class="content">
+        <p>In a <a href="/brute-forcing-protected-zip-rust">previous article</a>, we explored how to build - step by step - a CLI in Rust to brute-force protected ZIP archives.</p>
+<p>The outcome of this research was the creation of the project <a href="https://github.com/agourlay/zip-password-finder">zip-password-finder</a>.</p>
+<p>Since the last publication, the project has been slowly evolving to mitigate the shortcomings that were highlighted.</p>
+<p>In this follow-up entry we will go over the improvements made and the latest performance numbers.</p>
+<h2 id="a-short-recap">A short recap</h2>
+<p>The project <code>zip-password-finder</code> supports two different modes to find the password: either from a dictionary file or by generating candidates from a charset.</p>
+<p>It uses a channel-based architecture to distribute candidate passwords to a set of workers who are responsible for testing them in parallel.</p>
+<p><img src="/2023-04-03/old-architecture.png" alt="Old architecture" /></p>
+<p>It is important to mention that ZIP archives can be encrypted using either ZipCrypto or <a href="https://en.wikipedia.org/wiki/Advanced_Encryption_Standard">AES</a>.</p>
+<p>In practice, ZipCrypto can be <a href="https://blog.devolutions.net/2020/08/why-you-should-never-use-zipcrypto/">attacked</a> and is much cheaper to brute force.</p>
+<p>As it can still be found in the wild, most notably produced by Windows machines, <code>zip-password-finder</code> handles this format transparently for the user.</p>
+<p>However, we won't give it much thought in this article given its issues and our desire to focus on the more difficult AES case.</p>
+<h2 id="test-drive">Test drive</h2>
+<p>Here is the CLI we are going to work with.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">./zip-password-finder -h
+</span><span style="color:#bf616a;">Find</span><span> the password of protected ZIP files
+</span><span>
+</span><span style="color:#bf616a;">Usage:</span><span> zip-password-finder </span><span style="color:#b48ead;">[</span><span>OPTIONS</span><span style="color:#b48ead;">]</span><span style="color:#bf616a;"> --inputFile </span><span>&lt;inputFile&gt;
+</span><span>
+</span><span style="color:#bf616a;">Options:
+</span><span>  </span><span style="color:#bf616a;">-i, --inputFile </span><span>&lt;inputFile&gt;
+</span><span>          </span><span style="color:#bf616a;">path</span><span> to zip input file
+</span><span>  </span><span style="color:#bf616a;">-w, --workers </span><span>&lt;workers&gt;
+</span><span>          </span><span style="color:#bf616a;">number</span><span> of workers
+</span><span>  </span><span style="color:#bf616a;">-p, --passwordDictionary </span><span>&lt;passwordDictionary&gt;
+</span><span>          </span><span style="color:#bf616a;">path</span><span> to a password dictionary file
+</span><span>  </span><span style="color:#bf616a;">-c, --charset </span><span>&lt;charset&gt;
+</span><span>          </span><span style="color:#bf616a;">charset</span><span> to use to generate password </span><span style="color:#b48ead;">[</span><span>default: medium</span><span style="color:#b48ead;">] [</span><span>possible values: basic, easy, medium, hard</span><span style="color:#b48ead;">]
+</span><span>      </span><span style="color:#bf616a;">--minPasswordLen </span><span>&lt;minPasswordLen&gt;
+</span><span>          </span><span style="color:#bf616a;">minimum</span><span> password length </span><span style="color:#b48ead;">[</span><span>default: 1</span><span style="color:#b48ead;">]
+</span><span>      </span><span style="color:#bf616a;">--maxPasswordLen </span><span>&lt;maxPasswordLen&gt;
+</span><span>          </span><span style="color:#bf616a;">maximum</span><span> password length </span><span style="color:#b48ead;">[</span><span>default: 10</span><span style="color:#b48ead;">]
+</span><span>  </span><span style="color:#bf616a;">-h, --help
+</span><span>          </span><span style="color:#bf616a;">Print</span><span> help information
+</span><span>  </span><span style="color:#bf616a;">-V, --version
+</span><span>          </span><span style="color:#bf616a;">Print</span><span> version information
+</span></code></pre>
+<p>We can give it a try by creating an encrypted zip archive; let's call it <code>secret.zip</code> with the four-characters password <code>&quot;ab12&quot;</code>.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">zipinfo</span><span> secret.zip 
+</span><span style="color:#bf616a;">Archive:</span><span>  secret.zip
+</span><span style="color:#bf616a;">Zip</span><span> file size: 209 bytes, number of entries: 1
+</span><span style="color:#bf616a;">-rw-rw-r--</span><span>  6.3 unx       13 Bx u099 23-Mar-27 20:17 secret.txt
+</span><span style="color:#bf616a;">1</span><span> file, 13 bytes uncompressed, 21 bytes compressed:</span><span style="color:#bf616a;">  -61</span><span>.5%
+</span></code></pre>
+<p>Given that the password is pretty short, we can ask <code>zip-password-finder</code> to generate all possible passwords from the charset formed by the lowercase letters, uppercase letters, and digits (called medium).</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">time</span><span> ./zip-password-finder</span><span style="color:#bf616a;"> -i</span><span> test-encrypted.zip</span><span style="color:#bf616a;"> --charset</span><span> medium
+</span></code></pre>
+<p>It returns with the right answer shortly before the one-minute mark.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">time</span><span> ./zip-password-finder-0.2</span><span style="color:#bf616a;"> -i ~</span><span>/Workspace/blog-data/find-password-zip/secret.zip</span><span style="color:#bf616a;"> -c</span><span> medium
+</span><span style="color:#bf616a;">Using</span><span> 4 workers to test passwords
+</span><span style="color:#bf616a;">Generating</span><span> passwords with length from 1 to 10 for charset with length 62
+</span><span style="color:#bf616a;">[</span><span>&#39;</span><span style="color:#a3be8c;">a</span><span>&#39;</span><span style="color:#bf616a;">, </span><span>&#39;</span><span style="color:#a3be8c;">b</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">c</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">d</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">e</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">f</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">g</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">h</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">i</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">j</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">k</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">l</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">m</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">n</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">o</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">p</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">q</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">r</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">s</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">t</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">u</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">v</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">w</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">x</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">y</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">z</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">A</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">B</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">C</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">D</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">E</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">F</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">G</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">H</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">I</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">J</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">K</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">L</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">M</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">N</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">O</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">P</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">Q</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">R</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">S</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">T</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">U</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">V</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">W</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">X</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">Y</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">Z</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">0</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">1</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">2</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">3</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">4</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">5</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">6</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">7</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">8</span><span>&#39;, &#39;</span><span style="color:#a3be8c;">9</span><span>&#39;]
+</span><span style="color:#bf616a;">Starting</span><span> search space for password length 1 (62 possibilities) 
+</span><span style="color:#bf616a;">Starting</span><span> search space for password length 2 (3844 possibilities) (</span><span style="color:#bf616a;">61</span><span> passwords generated so far)
+</span><span style="color:#bf616a;">Starting</span><span> search space for password length 3 (238328 possibilities) (</span><span style="color:#bf616a;">3905</span><span> passwords generated so far)
+</span><span style="color:#bf616a;">Starting</span><span> search space for password length 4 (14776336 possibilities) (</span><span style="color:#bf616a;">242233</span><span> passwords generated so far)
+</span><span style="color:#bf616a;">Password</span><span> found &#39;</span><span style="color:#a3be8c;">ab12</span><span>&#39;
+</span><span>
+</span><span style="color:#bf616a;">real</span><span> 0m54,262s
+</span><span style="color:#bf616a;">user</span><span> 3m40,620s
+</span><span style="color:#bf616a;">sys</span><span>  0m2,431s
+</span></code></pre>
+<p>Finding a 4-letters password on such a small charset was a rather easy task for a modern CPU.</p>
+<p>There are only <code>(26 lower + 26 upper + 10 digit)^4 = 14.776.336</code> candidates to test.</p>
+<p>However, a learning from the previous article is that scalability suffers as the number of workers increases.</p>
+<p>Improving on this limitation is critical for being able to work against real-world passwords.</p>
+<p>We will reuse this test file for the benchmarks in the rest of the article.</p>
+<h2 id="indepedent-workers">Indepedent workers</h2>
+<p>Previous measurements clearly showed that performance did not improve linearly with the number of workers.</p>
+<p>We previously attributed the flat line between 4 and 8 workers to the Hyperthreading on my CPU, which does not bode well for this type of workload.</p>
+<p><img src="/2023-04-03/scalability.png" alt="Scalability" /></p>
+<p>The most logical hypothesis is that there is a source of contention in the current architecture as the number of workers increases.</p>
+<p>It seems straightforward to believe that workers are somehow competing and synchronizing with each other to poll candidates from the channel.</p>
+<p>Picking an easy architecture helped us get started at the beginning, but it could very well be a limiting factor to get faster.</p>
+<p>An interesting insight is that workers do not need to share the same source of passwords.</p>
+<p>Each worker could agree upfront to work on a subset of the generated passwords.</p>
+<p>Given n workers, each worker generates and tests <code>1/n</code> of the passwords with an offset.</p>
+<p>For instance, with 3 workers on a lowercase charset:</p>
+<ul>
+<li>first worker : &quot;a&quot;, &quot;d&quot;, &quot;g&quot;, &quot;j&quot;, ...</li>
+<li>second worker: &quot;b&quot;, &quot;e&quot;, &quot;h&quot;, &quot;k&quot;, ...</li>
+<li>third worker : &quot;c&quot;, &quot;f&quot;, &quot;i&quot;, &quot;l&quot;, ...</li>
+</ul>
+<p>This way, we remove all coordination at runtime, so the workers can make progress in isolation.</p>
+<p><img src="/2023-04-03/new-architecture.png" alt="New architecture" /></p>
+<p>This pattern can be elegantly integrated by refactoring the dictionary reader and password generator to be proper <code>Iterator</code>.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">let mut</span><span> passwords_iter: Box&lt;dyn Iterator&lt;Item = String&gt;&gt; = </span><span style="color:#b48ead;">match</span><span> strategy {
+</span><span>    Strategy::GenPasswords {
+</span><span>        charset,
+</span><span>        min_password_len,
+</span><span>        max_password_len,
+</span><span>    } =&gt; {
+</span><span>        </span><span style="color:#b48ead;">let</span><span> iterator = </span><span style="color:#96b5b4;">password_generator_iter</span><span>(&amp;charset, min_password_len, max_password_len);
+</span><span>        Box::new(iterator)
+</span><span>    },
+</span><span>    Strategy::PasswordFile(dictionary_path) =&gt; {
+</span><span>        </span><span style="color:#b48ead;">let</span><span> iterator = </span><span style="color:#96b5b4;">password_dictionary_reader_iter</span><span>(&amp;dictionary_path);
+</span><span>        Box::new(iterator)
+</span><span>    }
+</span><span>};
+</span><span>
+</span><span style="color:#65737e;">// filtering iterator for worker `worker_index`
+</span><span>passwords_iter = </span><span style="color:#b48ead;">if</span><span> worker_count &gt; </span><span style="color:#d08770;">1 </span><span>{
+</span><span>    </span><span style="color:#b48ead;">let</span><span> filtered = passwords_iter.</span><span style="color:#96b5b4;">enumerate</span><span>().</span><span style="color:#96b5b4;">filter_map</span><span>(</span><span style="color:#b48ead;">move </span><span>|(i, candidate)| {
+</span><span>        </span><span style="color:#b48ead;">if</span><span> i % worker_count == worker_index - </span><span style="color:#d08770;">1 </span><span>{
+</span><span>            Some(candidate)
+</span><span>        } </span><span style="color:#b48ead;">else </span><span>{
+</span><span>            None
+</span><span>        }
+</span><span>    })
+</span><span>    Box::new(filtered)
+</span><span>} </span><span style="color:#b48ead;">else </span><span>{
+</span><span>    passwords_iter
+</span><span>}
+</span><span>
+</span><span style="color:#65737e;">// processing loop
+</span><span style="color:#b48ead;">for</span><span> password in passwords_iter {
+</span><span>    ...        
+</span><span>}   
+</span></code></pre>
+<p>Benchmarking both architectures on the <code>secret.zip</code> archive with various numbers of workers yields the following result.</p>
+<p><img src="/2023-04-03/independent-workers-effect.png" alt="New architecture effect" /></p>
+<p>The performance improved slightly, but the shape of the curve did not change, meaning the scalability profile did not get any better.</p>
+<p>Switching to independent workers is beneficial, but it did not have the desired effect.</p>
+<p>There is more research to be done to improve scalability.</p>
+<h2 id="cheaper-iteration">Cheaper iteration</h2>
+<p>One obvious strategy to go faster is to make testing a candidate as cheap as possible.</p>
+<p>The first version of the project was rather naive in that regard.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">let mut</span><span> archive = zip::ZipArchive::new(file).</span><span style="color:#96b5b4;">expect</span><span>(&quot;</span><span style="color:#a3be8c;">Archive validated before-hand</span><span>&quot;);
+</span><span style="color:#b48ead;">loop </span><span>{
+</span><span>    </span><span style="color:#b48ead;">match</span><span> receive_password.</span><span style="color:#96b5b4;">recv</span><span>() {
+</span><span>        Err(_) =&gt; </span><span style="color:#b48ead;">break</span><span>, </span><span style="color:#65737e;">// channel disconnected, stop thread
+</span><span>        Ok(password) =&gt; {
+</span><span>            </span><span style="color:#b48ead;">let</span><span> res = archive.</span><span style="color:#96b5b4;">by_index_decrypt</span><span>(</span><span style="color:#d08770;">0</span><span>, password.</span><span style="color:#96b5b4;">as_bytes</span><span>()); </span><span style="color:#65737e;">// decrypt first file in archive
+</span><span>            </span><span style="color:#b48ead;">match</span><span> res {
+</span><span>                Err(e) =&gt; panic!(&quot;</span><span style="color:#a3be8c;">Unexpected error {:?}</span><span>&quot;, e),
+</span><span>                Ok(Err(_)) =&gt; (), </span><span style="color:#65737e;">// invalid password - continue
+</span><span>                Ok(Ok(_)) =&gt; {
+</span><span>                    println!(&quot;</span><span style="color:#a3be8c;">Password found:</span><span style="color:#d08770;">{}</span><span>&quot;, password);
+</span><span>                    </span><span style="color:#b48ead;">break</span><span>; </span><span style="color:#65737e;">// stop thread
+</span><span>                }
+</span><span>            }
+</span><span>        }
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>For each candidate, the function <code>archive.by_index_decrypt(0, password)</code> is called; hopefully it does not do too much.</p>
+<p>This function belongs to the <code>zip-rs</code> project and performs the following actions:</p>
+<ol>
+<li>Find file data in the archive based on file index used (here 0).</li>
+<li>Verify that the file is encrypted.</li>
+<li>Load raw content of the file.</li>
+<li>Prepare AES decoder (get salt &amp; verification key).</li>
+<li>Compute key for candidate and salt.</li>
+<li>Compare derived key to verification key.</li>
+</ol>
+<p>Well, that is a <strong>lot</strong> of repetition!</p>
+<p>Ideally, we just want to perform the 5th and 6th steps for each candidate, the rest can be pre-computed.</p>
+<p>To do this, I had to fork the <code>zip-rs</code> crate to expose some internals.</p>
+<p>On the <code>AesReader</code>:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#65737e;">/// Read the AES header bytes and returns the key and salt.
+</span><span style="color:#65737e;">///
+</span><span style="color:#65737e;">/// # Returns
+</span><span style="color:#65737e;">///
+</span><span style="color:#65737e;">/// the key and the salt
+</span><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">get_key_and_salt</span><span>(</span><span style="color:#b48ead;">mut </span><span style="color:#bf616a;">self</span><span>) -&gt; io::Result&lt;(Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt;, Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt;)&gt; {
+</span><span>    </span><span style="color:#b48ead;">let</span><span> salt_length = </span><span style="color:#bf616a;">self</span><span>.aes_mode.</span><span style="color:#96b5b4;">salt_length</span><span>();
+</span><span>
+</span><span>    </span><span style="color:#b48ead;">let mut</span><span> salt = vec![</span><span style="color:#d08770;">0</span><span>; salt_length];
+</span><span>    </span><span style="color:#bf616a;">self</span><span>.reader.</span><span style="color:#96b5b4;">read_exact</span><span>(&amp;</span><span style="color:#b48ead;">mut</span><span> salt)?;
+</span><span>
+</span><span>    </span><span style="color:#65737e;">// next are 2 bytes used for password verification
+</span><span>    </span><span style="color:#b48ead;">let mut</span><span> pwd_verification_value = vec![</span><span style="color:#d08770;">0</span><span>; </span><span style="color:#d08770;">PWD_VERIFY_LENGTH</span><span>];
+</span><span>    </span><span style="color:#bf616a;">self</span><span>.reader.</span><span style="color:#96b5b4;">read_exact</span><span>(&amp;</span><span style="color:#b48ead;">mut</span><span> pwd_verification_value)?;
+</span><span>    Ok((pwd_verification_value, salt))
+</span><span>}
+</span></code></pre>
+<p>And on the <code>ZipArchiveReader</code>:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#65737e;">/// Returns key and salt
+</span><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">get_aes_key_and_salt</span><span>(
+</span><span>    &amp;</span><span style="color:#b48ead;">mut </span><span style="color:#bf616a;">self</span><span>,
+</span><span>    </span><span style="color:#bf616a;">file_number</span><span>: </span><span style="color:#b48ead;">usize</span><span>,
+</span><span>) -&gt; ZipResult&lt;Option&lt;(AesMode, Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt;, Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt;)&gt;&gt; {
+</span><span>    </span><span style="color:#b48ead;">let</span><span> data = </span><span style="color:#bf616a;">self
+</span><span>        .shared
+</span><span>        .files
+</span><span>        .</span><span style="color:#96b5b4;">get</span><span>(file_number)
+</span><span>        .</span><span style="color:#96b5b4;">ok_or</span><span>(ZipError::FileNotFound)?;
+</span><span>
+</span><span>    </span><span style="color:#b48ead;">if </span><span>!data.encrypted {
+</span><span>        </span><span style="color:#b48ead;">return </span><span>Err(ZipError::UnsupportedArchive(ZipError::</span><span style="color:#d08770;">PASSWORD_REQUIRED</span><span>));
+</span><span>    }
+</span><span>    </span><span style="color:#b48ead;">let</span><span> limit_reader = </span><span style="color:#96b5b4;">find_content</span><span>(data, &amp;</span><span style="color:#b48ead;">mut </span><span style="color:#bf616a;">self</span><span>.reader)?;
+</span><span>    </span><span style="color:#b48ead;">match</span><span> data.aes_mode {
+</span><span>        None =&gt; Ok(None),
+</span><span>        Some((aes_mode, _)) =&gt; {
+</span><span>            </span><span style="color:#b48ead;">let </span><span>(key, salt) = AesReader::new(limit_reader, aes_mode, data.compressed_size)
+</span><span>                .</span><span style="color:#96b5b4;">get_key_and_salt</span><span>() </span><span style="color:#65737e;">// NEW
+</span><span>                .</span><span style="color:#96b5b4;">expect</span><span>(&quot;</span><span style="color:#a3be8c;">AES reader failed</span><span>&quot;);
+</span><span>            Ok(Some((aes_mode, key, salt)))
+</span><span>        }
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>Luckily, Cargo makes it very low-friction to work with a forked crate!</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">zip</span><span> = { git = &quot;</span><span style="color:#a3be8c;">https://github.com/agourlay/zip.git</span><span>&quot;, branch = &quot;</span><span style="color:#a3be8c;">zip-password-finder</span><span>&quot; }
+</span></code></pre>
+<p>Thanks to this insight, it is possible to pre-compute most of the AES information, removing a lot of work from the processing loop.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#65737e;">// AES info bindings initialized once
+</span><span style="color:#b48ead;">let mut</span><span> derived_key_len = ...
+</span><span style="color:#b48ead;">let mut</span><span> derived_key: Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt; = ...
+</span><span style="color:#b48ead;">let mut</span><span> salt: Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt; = ...
+</span><span style="color:#b48ead;">let mut</span><span> key: Vec&lt;</span><span style="color:#b48ead;">u8</span><span>&gt; = ...
+</span><span>
+</span><span style="color:#65737e;">// processing loop
+</span><span style="color:#b48ead;">for</span><span> password in passwords_iter {
+</span><span>    </span><span style="color:#b48ead;">let</span><span> password_bytes = password.</span><span style="color:#96b5b4;">as_bytes</span><span>();
+</span><span>    </span><span style="color:#b48ead;">let mut</span><span> potential_match = </span><span style="color:#d08770;">true</span><span>;
+</span><span>    </span><span style="color:#65737e;">// process AES KEY
+</span><span>    </span><span style="color:#65737e;">// use PBKDF2 with HMAC-Sha1 to derive the key
+</span><span>    pbkdf2::pbkdf2::&lt;Hmac&lt;Sha1&gt;&gt;(password_bytes, &amp;salt, </span><span style="color:#d08770;">1000</span><span>, &amp;</span><span style="color:#b48ead;">mut</span><span> derived_key).</span><span style="color:#96b5b4;">expect</span><span>(&quot;</span><span style="color:#a3be8c;">PBKDF2 should not fail</span><span>&quot;);
+</span><span>    </span><span style="color:#b48ead;">let</span><span> pwd_verify = &amp;derived_key[derived_key_len - </span><span style="color:#d08770;">2</span><span>..];
+</span><span>    </span><span style="color:#65737e;">// the last 2 bytes should equal the password verification value
+</span><span>    potential_match = key == pwd_verify;
+</span><span>    
+</span><span>    </span><span style="color:#b48ead;">if</span><span> potential_match {
+</span><span>        </span><span style="color:#65737e;">// try to decode archive to eliminate collision
+</span><span>        </span><span style="color:#b48ead;">let</span><span> res = archive.</span><span style="color:#96b5b4;">by_index_decrypt</span><span>(</span><span style="color:#d08770;">0</span><span>, password.</span><span style="color:#96b5b4;">as_bytes</span><span>()); </span><span style="color:#65737e;">// decrypt first file in archive
+</span><span>        ...
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>Benchmarking the difference:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span> </span><span style="color:#bf616a;">hyperfine --runs</span><span> 2 \
+</span><span style="color:#bf616a;"> --warmup</span><span> 1 \
+</span><span style="color:#bf616a;"> -n</span><span> before &quot;</span><span style="color:#a3be8c;">./zip-password-finder-before -i secret.zip -c medium</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> after  &quot;</span><span style="color:#a3be8c;">./zip-password-finder-after  -i secret.zip -c medium</span><span>&quot;
+</span></code></pre>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>before</code></td><td style="text-align: right">58.977 ± 0.512</td><td style="text-align: right">58.615</td><td style="text-align: right">59.339</td><td style="text-align: right">1.08 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>after</code></td><td style="text-align: right">54.476 ± 0.037</td><td style="text-align: right">54.450</td><td style="text-align: right">54.503</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>A solid 8% improvement is something I gladly take.</p>
+<h2 id="performance-over-time">Performance over time</h2>
+<p>Outside of the two previously mentioned improvements, the runtime improved slowly over time.</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.1</code></td><td style="text-align: right">62.317 ± 0.224</td><td style="text-align: right">62.159</td><td style="text-align: right">62.475</td><td style="text-align: right">1.21 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.2</code></td><td style="text-align: right">58.823 ± 0.013</td><td style="text-align: right">58.814</td><td style="text-align: right">58.833</td><td style="text-align: right">1.14 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.3</code></td><td style="text-align: right">59.423 ± 0.047</td><td style="text-align: right">59.390</td><td style="text-align: right">59.456</td><td style="text-align: right">1.15 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.4</code></td><td style="text-align: right">55.562 ± 0.034</td><td style="text-align: right">55.538</td><td style="text-align: right">55.586</td><td style="text-align: right">1.08 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.5</code></td><td style="text-align: right">56.877 ± 0.362</td><td style="text-align: right">56.621</td><td style="text-align: right">57.132</td><td style="text-align: right">1.10 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.5.1</code></td><td style="text-align: right">54.230 ± 0.424</td><td style="text-align: right">53.930</td><td style="text-align: right">54.530</td><td style="text-align: right">1.05 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.6</code></td><td style="text-align: right">51.619 ± 0.412</td><td style="text-align: right">51.327</td><td style="text-align: right">51.911</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>0.6.1</code></td><td style="text-align: right">52.421 ± 0.166</td><td style="text-align: right">52.303</td><td style="text-align: right">52.538</td><td style="text-align: right">1.02 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.6.2</code></td><td style="text-align: right">52.149 ± 0.155</td><td style="text-align: right">52.039</td><td style="text-align: right">52.259</td><td style="text-align: right">1.01 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.6.3</code></td><td style="text-align: right">52.073 ± 0.193</td><td style="text-align: right">51.937</td><td style="text-align: right">52.209</td><td style="text-align: right">1.01 ± 0.01</td></tr>
+</tbody></table>
+<p>However, the performance optimizations are hitting a wall; a single bottleneck is now largely dominating the CPU usage.</p>
+<p>Each worker is busy doing the following: (full <a href="/2023-04-03/final-flamegraph.svg">flamegraph</a> available).</p>
+<p><img src="/2023-04-03/flamegraph-worker.png" alt="Flamegraph worker" /></p>
+<p>Computing the SHA1 for each candidate takes up to 90% of the total CPU time; improving this implementation would have a <strong>massive</strong> impact on the runtime!</p>
+<p>It is interesting to note that function is called <code>sha1::compress::soft::compress</code> - now that's a weird name.</p>
+<p>Let's take a look under the <a href="https://github.com/RustCrypto/hashes/blob/master/sha1/src/compress/x86.rs#L102">hood</a>.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span>cpufeatures::new!(shani_cpuid, &quot;</span><span style="color:#a3be8c;">sha</span><span>&quot;, &quot;</span><span style="color:#a3be8c;">sse2</span><span>&quot;, &quot;</span><span style="color:#a3be8c;">ssse3</span><span>&quot;, &quot;</span><span style="color:#a3be8c;">sse4.1</span><span>&quot;);
+</span><span>
+</span><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">compress</span><span>(</span><span style="color:#bf616a;">state</span><span>: &amp;</span><span style="color:#b48ead;">mut</span><span> [</span><span style="color:#b48ead;">u32</span><span>; 5], </span><span style="color:#bf616a;">blocks</span><span>: &amp;[[</span><span style="color:#b48ead;">u8</span><span>; 64]]) {
+</span><span>    </span><span style="color:#b48ead;">if </span><span>shani_cpuid::get() {
+</span><span>        </span><span style="color:#b48ead;">unsafe </span><span>{
+</span><span>            </span><span style="color:#96b5b4;">digest_blocks</span><span>(state, blocks);
+</span><span>        }
+</span><span>    } </span><span style="color:#b48ead;">else </span><span>{
+</span><span>        </span><span style="color:#b48ead;">super</span><span>::soft::compress(state, blocks);
+</span><span>    }
+</span><span>}
+</span><span>
+</span><span>#[</span><span style="color:#bf616a;">target_feature</span><span>(enable = &quot;</span><span style="color:#a3be8c;">sha,sse2,ssse3,sse4.1</span><span>&quot;)]
+</span><span style="color:#b48ead;">unsafe fn </span><span style="color:#8fa1b3;">digest_blocks</span><span>(</span><span style="color:#bf616a;">state</span><span>: &amp;</span><span style="color:#b48ead;">mut</span><span> [</span><span style="color:#b48ead;">u32</span><span>; 5], </span><span style="color:#bf616a;">blocks</span><span>: &amp;[[</span><span style="color:#b48ead;">u8</span><span>; 64]]) {
+</span><span>   ...
+</span><span>}    
+</span></code></pre>
+<p>This code is picking an implementation at runtime based on the capabilities of the CPU.</p>
+<p>The branching depends on the <code>sha</code>, <code>sse2</code>, <code>ssse3</code> and <code>sse4.1</code> instruction sets.</p>
+<p>Here, <code>soft</code> stands for <code>software</code>, meaning not using hardware acceleration.</p>
+<p>But why is my CPU not eligible for the optimized SIMD implementation?</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">lscpu
+</span><span style="color:#bf616a;">Architecture:</span><span>            x86_64
+</span><span>  </span><span style="color:#bf616a;">CPU</span><span> op-mode(s)</span><span style="color:#96b5b4;">:</span><span>        32-bit, 64-bit
+</span><span>  </span><span style="color:#bf616a;">Address</span><span> sizes:         39 bits physical, 48 bits virtual
+</span><span>  </span><span style="color:#bf616a;">Byte</span><span> Order:            Little Endian
+</span><span style="color:#bf616a;">CPU</span><span>(s)</span><span style="color:#96b5b4;">:</span><span>                  8
+</span><span>  </span><span style="color:#bf616a;">On-line</span><span> CPU(s) </span><span style="color:#bf616a;">list:</span><span>   0-7
+</span><span style="color:#bf616a;">Vendor</span><span> ID:               GenuineIntel
+</span><span>  </span><span style="color:#bf616a;">Model</span><span> name:            Intel(R) </span><span style="color:#bf616a;">Core</span><span>(TM) </span><span style="color:#bf616a;">i7-10610U</span><span> CPU @ 1.80GHz
+</span><span style="color:#bf616a;">...
+</span><span> </span><span style="color:#bf616a;">Flags:</span><span>               ...sse sse2 ssse3 sse4_1 sse4_2...
+</span></code></pre>
+<p>Sadly, I have all the necessary <code>sse</code> instructions but missing the <code>sha</code> one.</p>
+<p>This means we need to make sure to use a CPU with <a href="https://en.wikipedia.org/wiki/Intel_SHA_extensions">SHA instructions</a> to get the best performance.</p>
+<h2 id="optimizing-build">Optimizing build</h2>
+<p>Given that I do not have access to adequate hardware, all I can do for the time being is tweak my build in order to squeeze out one last performance gain.</p>
+<p>The first idea is to enable Link-time Optimization (LTO), which is an optimization taking place at compile time.</p>
+<p>Be aware that it can make the compilation much slower!</p>
+<p>There are two possible values for it:</p>
+<pre data-lang="txt" style="background-color:#2b303b;color:#c0c5ce;" class="language-txt "><code class="language-txt" data-lang="txt"><span>[profile.release]
+</span><span>lto = &quot;thin&quot; or &quot;fat&quot;
+</span></code></pre>
+<p>A second idea is to a build binary with the best instructions for the current CPU.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">RUSTFLAGS</span><span>=&quot;</span><span style="color:#a3be8c;">-C target-cpu=native</span><span>&quot; </span><span style="color:#bf616a;">cargo</span><span> build</span><span style="color:#bf616a;"> --release
+</span></code></pre>
+<p>Benchmarking those configurations yields the following results:</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>native</code></td><td style="text-align: right">52.456 ± 2.987</td><td style="text-align: right">50.344</td><td style="text-align: right">54.568</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>master</code></td><td style="text-align: right">57.439 ± 1.135</td><td style="text-align: right">56.637</td><td style="text-align: right">58.241</td><td style="text-align: right">1.09 ± 0.07</td></tr>
+<tr><td style="text-align: left"><code>native-lto</code></td><td style="text-align: right">59.161 ± 0.437</td><td style="text-align: right">58.852</td><td style="text-align: right">59.470</td><td style="text-align: right">1.13 ± 0.06</td></tr>
+<tr><td style="text-align: left"><code>lto-thin</code></td><td style="text-align: right">61.677 ± 0.153</td><td style="text-align: right">61.569</td><td style="text-align: right">61.786</td><td style="text-align: right">1.18 ± 0.07</td></tr>
+<tr><td style="text-align: left"><code>lto-fat</code></td><td style="text-align: right">67.777 ± 0.277</td><td style="text-align: right">67.582</td><td style="text-align: right">67.973</td><td style="text-align: right">1.29 ± 0.07</td></tr>
+</tbody></table>
+<p>Well, we better not enable LTO but there is a case to be made for a native build.</p>
+<p>This performance related section was a bit messy, but we learned a few important things:</p>
+<ul>
+<li>Do not blindly enable LTO without validating that it is beneficial.</li>
+<li>If you are super serious about performance, you would probably benefit from producing native binaries for your hardware.</li>
+<li>Some libraries have alternate implementations depending on the hardware capabilities.</li>
+</ul>
+<h2 id="state-of-the-art">State of the art</h2>
+<p>To appreciate the performance of <code>zip-password-finder</code>, I thought it would be a good idea to compare it to the state of the art of ZIP cracking.</p>
+<p>It seems <strong>serious</strong> people are using the <a href="https://hashcat.net/hashcat/">Hashcat</a> project, which is apparently the &quot;World's fastest password cracker&quot;!</p>
+<p><img src="/2023-04-03/hashcat-logo.png" alt="Hashcat logo" /></p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">sudo</span><span> apt-get install hashcat
+</span></code></pre>
+<p>This tool runs on GPUs; in my case, I had to install the <a href="https://github.com/intel/compute-runtime/">OpenCL Runtime for Intel Core</a>.</p>
+<p>It supports a very large list of algorithms, including the one we need here, <code>WinZip</code>.</p>
+<p>In order to use <code>Hashcat</code>, we first need to extract the underlying hash of our zip file into a format that is understood by <code>Hashcat</code>.</p>
+<p>To that end, we will use <code>zip2john</code> from the <a href="https://github.com/openwall/john">John the Ripper</a> project.</p>
+<p>Installing it <a href="https://superuser.com/questions/1457837/command-zip2john-is-not-working">manually</a> with:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">git</span><span> clone https://github.com/openwall/john</span><span style="color:#bf616a;"> -b</span><span> bleeding-jumbo john
+</span><span style="color:#96b5b4;">cd</span><span> john/src/
+</span><span style="color:#bf616a;">./configure
+</span><span style="color:#bf616a;">make -s</span><span> clean &amp;&amp; </span><span style="color:#bf616a;">make -sj4
+</span></code></pre>
+<p>and then running it</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#96b5b4;">cd</span><span> /Workspace/john/run
+</span><span style="color:#bf616a;">./zip2john ~</span><span>/zip-files/secret.zip
+</span></code></pre>
+<p>yields the text</p>
+<pre data-lang="txt" style="background-color:#2b303b;color:#c0c5ce;" class="language-txt "><code class="language-txt" data-lang="txt"><span>secret.zip/secret.txt:$zip2$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a99031db50f79a*d9e156b830df03899575*$/zip2$:secret.txt:secret.zip:/home/agourlay/zip-files/secret.zip
+</span></code></pre>
+<p>The output needs to be cleaned up and saved into into a file, <code>hash.txt</code> here.</p>
+<pre data-lang="txt" style="background-color:#2b303b;color:#c0c5ce;" class="language-txt "><code class="language-txt" data-lang="txt"><span>$zip2$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a99031db50f79a*d9e156b830df03899575*$/zip2$
+</span></code></pre>
+<p>After a rather tedious setup, it is finally time to crack our hash!</p>
+<p>We need to instruct <code>hashcat</code> to:</p>
+<ul>
+<li>perform a brute force attack</li>
+<li>target the <code>hash.txt</code></li>
+<li>use an algorithm for ZIP archive hashes</li>
+<li>generate passwords for a charset with lower case, upper case and digits (up to 4 chars)</li>
+</ul>
+<p>Luckily for us, the help prompt is truly excellent!</p>
+<p>Here are the interesting excerpts:</p>
+<p>For the attack mode:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">- </span><span style="color:#b48ead;">[</span><span> Attack Modes </span><span style="color:#b48ead;">]</span><span> -
+</span><span>
+</span><span>  </span><span style="color:#65737e;"># | Mode
+</span><span> =</span><span style="color:#a3be8c;">==+======
+</span><span>  </span><span style="color:#bf616a;">0 </span><span>| </span><span style="color:#bf616a;">Straight
+</span><span>  </span><span style="color:#bf616a;">1 </span><span>| </span><span style="color:#bf616a;">Combination
+</span><span>  </span><span style="color:#bf616a;">3 </span><span>| </span><span style="color:#bf616a;">Brute-force
+</span><span>  </span><span style="color:#bf616a;">6 </span><span>| </span><span style="color:#bf616a;">Hybrid</span><span> Wordlist + Mask
+</span><span>  </span><span style="color:#bf616a;">7 </span><span>| </span><span style="color:#bf616a;">Hybrid</span><span> Mask + Wordlist
+</span><span>  </span><span style="color:#bf616a;">9 </span><span>| </span><span style="color:#bf616a;">Association
+</span></code></pre>
+<p>For the hash type:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">- </span><span style="color:#b48ead;">[</span><span> Hash modes </span><span style="color:#b48ead;">]</span><span> -
+</span><span>      </span><span style="color:#65737e;"># | Name                                                | Category
+</span><span>  </span><span style="color:#bf616a;">13600 </span><span>| </span><span style="color:#bf616a;">WinZip                                              </span><span>| </span><span style="color:#bf616a;">Archive
+</span></code></pre>
+<p>For the charset:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span>  </span><span style="color:#bf616a;">? </span><span>| </span><span style="color:#bf616a;">Charset
+</span><span> =</span><span style="color:#a3be8c;">==+=========
+</span><span>  </span><span style="color:#bf616a;">l </span><span>| </span><span style="color:#bf616a;">abcdefghijklmnopqrstuvwxyz </span><span style="color:#b48ead;">[</span><span>a-z</span><span style="color:#b48ead;">]
+</span><span>  </span><span style="color:#bf616a;">u </span><span>| </span><span style="color:#bf616a;">ABCDEFGHIJKLMNOPQRSTUVWXYZ </span><span style="color:#b48ead;">[</span><span>A-Z</span><span style="color:#b48ead;">]
+</span><span>  </span><span style="color:#bf616a;">d </span><span>| </span><span style="color:#bf616a;">0123456789                 </span><span style="color:#b48ead;">[</span><span>0-9</span><span style="color:#b48ead;">]
+</span><span>  </span><span style="color:#bf616a;">h </span><span>| </span><span style="color:#bf616a;">0123456789abcdef           </span><span style="color:#b48ead;">[</span><span>0-9a-f</span><span style="color:#b48ead;">]
+</span><span>  </span><span style="color:#bf616a;">H </span><span>| </span><span style="color:#bf616a;">0123456789ABCDEF           </span><span style="color:#b48ead;">[</span><span>0-9A-F</span><span style="color:#b48ead;">]
+</span><span>  </span><span style="color:#bf616a;">s </span><span>|  </span><span style="color:#bf616a;">!</span><span>&quot;</span><span style="color:#a3be8c;">#$%&amp;&#39;()*+,-./:;&lt;=&gt;?@[\]^_`</span><span style="color:#bf616a;">{</span><span>|</span><span style="color:#a3be8c;">}</span><span style="color:#bf616a;">~
+</span><span style="color:#a3be8c;">  </span><span style="color:#bf616a;">a </span><span>| </span><span style="color:#bf616a;">?l?u?d?s
+</span><span style="color:#a3be8c;">  </span><span style="color:#bf616a;">b </span><span>| </span><span style="color:#bf616a;">0x00</span><span style="color:#a3be8c;"> - 0xff
+</span></code></pre>
+<p>According to the <a href="https://hashcat.net/wiki/doku.php?id=mask_attack">documentation</a>, it seems we need to setup a four-characters mask that will be explored incrementally.</p>
+<p>After a bit of trial and error, it gives the following magic incantation:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hashcat -a</span><span> 3 hash.txt</span><span style="color:#bf616a;"> -m</span><span> 13600</span><span style="color:#bf616a;"> -1 </span><span>?l?u?d ?1?1?1?1</span><span style="color:#bf616a;"> --increment
+</span></code></pre>
+<p>Let's go!</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">time</span><span> hashcat</span><span style="color:#bf616a;"> -a</span><span> 3 hash.txt</span><span style="color:#bf616a;"> -m</span><span> 13600</span><span style="color:#bf616a;"> -1 </span><span>?l?u?d ?1?1?1?1</span><span style="color:#bf616a;"> --increment
+</span><span style="color:#bf616a;">hashcat</span><span> (v6.2.5) </span><span style="color:#bf616a;">starting
+</span><span>
+</span><span style="color:#bf616a;">OpenCL</span><span> API (OpenCL 3.0 ) </span><span style="color:#bf616a;">-</span><span> Platform </span><span style="color:#65737e;">#1 [Intel(R) Corporation]
+</span><span>=</span><span style="color:#a3be8c;">============================================================
+</span><span style="color:#bf616a;">*</span><span> Device </span><span style="color:#65737e;">#1: Intel(R) UHD Graphics [0x9b41], 12640/25384 MB (2047 MB allocatable), 24MCU
+</span><span>
+</span><span style="color:#bf616a;">Minimum</span><span> password length supported by kernel: 0
+</span><span style="color:#bf616a;">Maximum</span><span> password length supported by kernel: 256
+</span><span>
+</span><span style="color:#bf616a;">Hashes:</span><span> 1 digests; </span><span style="color:#bf616a;">1</span><span> unique digests, 1 unique salts
+</span><span style="color:#bf616a;">Bitmaps:</span><span> 16 bits, 65536 entries, 0x0000ffff mask, 262144 bytes, 5/13 rotates
+</span><span>
+</span><span style="color:#bf616a;">Optimizers</span><span> applied:
+</span><span style="color:#bf616a;">*</span><span> Zero-Byte
+</span><span style="color:#bf616a;">*</span><span> Single-Hash
+</span><span style="color:#bf616a;">*</span><span> Single-Salt
+</span><span style="color:#bf616a;">*</span><span> Brute-Force
+</span><span style="color:#bf616a;">*</span><span> Slow-Hash-SIMD-LOOP
+</span><span>
+</span><span style="color:#bf616a;">Watchdog:</span><span> Hardware monitoring interface not found on your system.
+</span><span style="color:#bf616a;">Watchdog:</span><span> Temperature abort trigger disabled.
+</span><span>
+</span><span style="color:#bf616a;">Host</span><span> memory required for this attack: 1475 MB
+</span><span>
+</span><span style="color:#bf616a;">The</span><span> wordlist or mask that you are using is too small.
+</span><span style="color:#bf616a;">This</span><span> means that hashcat cannot use the full parallel power of your device(s)</span><span style="color:#96b5b4;">.
+</span><span style="color:#bf616a;">Unless</span><span> you supply more work, your cracking speed will drop.
+</span><span style="color:#bf616a;">For</span><span> tips on supplying more work, see: https://hashcat.net/faq/morework
+</span><span>
+</span><span style="color:#bf616a;">Approaching</span><span> final keyspace - workload adjusted.           
+</span><span>
+</span><span style="color:#bf616a;">Session..........:</span><span> hashcat                                
+</span><span style="color:#bf616a;">Status...........:</span><span> Exhausted
+</span><span style="color:#bf616a;">Hash.Mode........:</span><span> 13600 (WinZip)
+</span><span style="color:#bf616a;">Hash.Target......: </span><span>$</span><span style="color:#bf616a;">zip2</span><span>$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a9.../zip2$
+</span><span style="color:#bf616a;">Time.Started.....:</span><span> Sat Apr  1 15:53:49 2023 (0 secs)
+</span><span style="color:#bf616a;">Time.Estimated...:</span><span> Sat Apr  1 15:53:49 2023 (0 secs)
+</span><span style="color:#bf616a;">Kernel.Feature...:</span><span> Pure Kernel
+</span><span style="color:#bf616a;">Guess.Mask.......: </span><span>?1 </span><span style="color:#b48ead;">[</span><span>1</span><span style="color:#b48ead;">]
+</span><span style="color:#bf616a;">Guess.Charset....: -1 </span><span>?l?u?d,</span><span style="color:#bf616a;"> -2</span><span> Undefined,</span><span style="color:#bf616a;"> -3</span><span> Undefined,</span><span style="color:#bf616a;"> -4</span><span> Undefined 
+</span><span style="color:#bf616a;">Guess.Queue......:</span><span> 1/4 (25.00%)
+</span><span style="color:#bf616a;">Speed.#1.........:</span><span>      117 H/s (6.27ms) </span><span style="color:#bf616a;">@</span><span> Accel:32 Loops:999 Thr:8 Vec:1
+</span><span style="color:#bf616a;">Recovered........:</span><span> 0/1 (0.00%) </span><span style="color:#bf616a;">Digests
+</span><span style="color:#bf616a;">Progress.........:</span><span> 62/62 (100.00%)
+</span><span style="color:#bf616a;">Rejected.........:</span><span> 0/62 (0.00%)
+</span><span style="color:#bf616a;">Restore.Point....:</span><span> 1/1 (100.00%)
+</span><span style="color:#bf616a;">Restore.Sub.#1...:</span><span> Salt:0 Amplifier:61-62 Iteration:0-999
+</span><span style="color:#bf616a;">Candidate.Engine.:</span><span> Device Generator
+</span><span style="color:#bf616a;">Candidates.#1....:</span><span> X -&gt; X
+</span><span>
+</span><span style="color:#bf616a;">The</span><span> wordlist or mask that you are using is too small.
+</span><span style="color:#bf616a;">This</span><span> means that hashcat cannot use the full parallel power of your device(s)</span><span style="color:#96b5b4;">.
+</span><span style="color:#bf616a;">Unless</span><span> you supply more work, your cracking speed will drop.
+</span><span style="color:#bf616a;">For</span><span> tips on supplying more work, see: https://hashcat.net/faq/morework
+</span><span>
+</span><span style="color:#bf616a;">Approaching</span><span> final keyspace - workload adjusted.           
+</span><span>
+</span><span style="color:#bf616a;">Session..........:</span><span> hashcat                                
+</span><span style="color:#bf616a;">Status...........:</span><span> Exhausted
+</span><span style="color:#bf616a;">Hash.Mode........:</span><span> 13600 (WinZip)
+</span><span style="color:#bf616a;">Hash.Target......: </span><span>$</span><span style="color:#bf616a;">zip2</span><span>$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a9.../zip2$
+</span><span style="color:#bf616a;">Time.Started.....:</span><span> Sat Apr  1 15:53:52 2023 (0 secs)
+</span><span style="color:#bf616a;">Time.Estimated...:</span><span> Sat Apr  1 15:53:52 2023 (0 secs)
+</span><span style="color:#bf616a;">Kernel.Feature...:</span><span> Pure Kernel
+</span><span style="color:#bf616a;">Guess.Mask.......: </span><span>?1?1 </span><span style="color:#b48ead;">[</span><span>2</span><span style="color:#b48ead;">]
+</span><span style="color:#bf616a;">Guess.Charset....: -1 </span><span>?l?u?d,</span><span style="color:#bf616a;"> -2</span><span> Undefined,</span><span style="color:#bf616a;"> -3</span><span> Undefined,</span><span style="color:#bf616a;"> -4</span><span> Undefined 
+</span><span style="color:#bf616a;">Guess.Queue......:</span><span> 2/4 (50.00%)
+</span><span style="color:#bf616a;">Speed.#1.........:</span><span>     7321 H/s (6.27ms) </span><span style="color:#bf616a;">@</span><span> Accel:16 Loops:999 Thr:16 Vec:1
+</span><span style="color:#bf616a;">Recovered........:</span><span> 0/1 (0.00%) </span><span style="color:#bf616a;">Digests
+</span><span style="color:#bf616a;">Progress.........:</span><span> 3844/3844 (100.00%)
+</span><span style="color:#bf616a;">Rejected.........:</span><span> 0/3844 (0.00%)
+</span><span style="color:#bf616a;">Restore.Point....:</span><span> 62/62 (100.00%)
+</span><span style="color:#bf616a;">Restore.Sub.#1...:</span><span> Salt:0 Amplifier:61-62 Iteration:0-999
+</span><span style="color:#bf616a;">Candidate.Engine.:</span><span> Device Generator
+</span><span style="color:#bf616a;">Candidates.#1....:</span><span> Xa -&gt; XQ
+</span><span>
+</span><span style="color:#bf616a;">The</span><span> wordlist or mask that you are using is too small.
+</span><span style="color:#bf616a;">This</span><span> means that hashcat cannot use the full parallel power of your device(s)</span><span style="color:#96b5b4;">.
+</span><span style="color:#bf616a;">Unless</span><span> you supply more work, your cracking speed will drop.
+</span><span style="color:#bf616a;">For</span><span> tips on supplying more work, see: https://hashcat.net/faq/morework
+</span><span>
+</span><span style="color:#bf616a;">Approaching</span><span> final keyspace - workload adjusted.           
+</span><span>
+</span><span style="color:#bf616a;">Session..........:</span><span> hashcat                                
+</span><span style="color:#bf616a;">Status...........:</span><span> Exhausted
+</span><span style="color:#bf616a;">Hash.Mode........:</span><span> 13600 (WinZip)
+</span><span style="color:#bf616a;">Hash.Target......: </span><span>$</span><span style="color:#bf616a;">zip2</span><span>$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a9.../zip2$
+</span><span style="color:#bf616a;">Time.Started.....:</span><span> Sat Apr  1 15:53:55 2023 (6 secs)
+</span><span style="color:#bf616a;">Time.Estimated...:</span><span> Sat Apr  1 15:54:01 2023 (0 secs)
+</span><span style="color:#bf616a;">Kernel.Feature...:</span><span> Pure Kernel
+</span><span style="color:#bf616a;">Guess.Mask.......: </span><span>?1?1?1 </span><span style="color:#b48ead;">[</span><span>3</span><span style="color:#b48ead;">]
+</span><span style="color:#bf616a;">Guess.Charset....: -1 </span><span>?l?u?d,</span><span style="color:#bf616a;"> -2</span><span> Undefined,</span><span style="color:#bf616a;"> -3</span><span> Undefined,</span><span style="color:#bf616a;"> -4</span><span> Undefined 
+</span><span style="color:#bf616a;">Guess.Queue......:</span><span> 3/4 (75.00%)
+</span><span style="color:#bf616a;">Speed.#1.........:</span><span>    40570 H/s (8.17ms) </span><span style="color:#bf616a;">@</span><span> Accel:16 Loops:999 Thr:16 Vec:1
+</span><span style="color:#bf616a;">Recovered........:</span><span> 0/1 (0.00%) </span><span style="color:#bf616a;">Digests
+</span><span style="color:#bf616a;">Progress.........:</span><span> 238328/238328 (100.00%)
+</span><span style="color:#bf616a;">Rejected.........:</span><span> 0/238328 (0.00%)
+</span><span style="color:#bf616a;">Restore.Point....:</span><span> 3844/3844 (100.00%)
+</span><span style="color:#bf616a;">Restore.Sub.#1...:</span><span> Salt:0 Amplifier:61-62 Iteration:0-999
+</span><span style="color:#bf616a;">Candidate.Engine.:</span><span> Device Generator
+</span><span style="color:#bf616a;">Candidates.#1....:</span><span> XFz -&gt; XQz
+</span><span>
+</span><span>$</span><span style="color:#bf616a;">zip2$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a99031db50f79a*d9e156b830df03899575*$/zip2$:ab12
+</span><span>                                                          
+</span><span style="color:#bf616a;">Session..........:</span><span> hashcat
+</span><span style="color:#bf616a;">Status...........:</span><span> Cracked
+</span><span style="color:#bf616a;">Hash.Mode........:</span><span> 13600 (WinZip)
+</span><span style="color:#bf616a;">Hash.Target......: </span><span>$</span><span style="color:#bf616a;">zip2</span><span>$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a9.../zip2$
+</span><span style="color:#bf616a;">Time.Started.....:</span><span> Sat Apr  1 15:54:04 2023 (1 sec)
+</span><span style="color:#bf616a;">Time.Estimated...:</span><span> Sat Apr  1 15:54:05 2023 (0 secs)
+</span><span style="color:#bf616a;">Kernel.Feature...:</span><span> Pure Kernel
+</span><span style="color:#bf616a;">Guess.Mask.......: </span><span>?1?1?1?1 </span><span style="color:#b48ead;">[</span><span>4</span><span style="color:#b48ead;">]
+</span><span style="color:#bf616a;">Guess.Charset....: -1 </span><span>?l?u?d,</span><span style="color:#bf616a;"> -2</span><span> Undefined,</span><span style="color:#bf616a;"> -3</span><span> Undefined,</span><span style="color:#bf616a;"> -4</span><span> Undefined 
+</span><span style="color:#bf616a;">Guess.Queue......:</span><span> 4/4 (100.00%)
+</span><span style="color:#bf616a;">Speed.#1.........:</span><span>    49139 H/s (101.71ms) </span><span style="color:#bf616a;">@</span><span> Accel:16 Loops:999 Thr:16 Vec:1
+</span><span style="color:#bf616a;">Recovered........:</span><span> 1/1 (100.00%) </span><span style="color:#bf616a;">Digests
+</span><span style="color:#bf616a;">Progress.........:</span><span> 36864/14776336 (0.25%)
+</span><span style="color:#bf616a;">Rejected.........:</span><span> 0/36864 (0.00%)
+</span><span style="color:#bf616a;">Restore.Point....:</span><span> 0/238328 (0.00%)
+</span><span style="color:#bf616a;">Restore.Sub.#1...:</span><span> Salt:0 Amplifier:5-6 Iteration:0-999
+</span><span style="color:#bf616a;">Candidate.Engine.:</span><span> Device Generator
+</span><span style="color:#bf616a;">Candidates.#1....:</span><span> aari -&gt; arIS
+</span><span>
+</span><span style="color:#bf616a;">Started:</span><span> Sat Apr  1 15:53:42 2023
+</span><span style="color:#bf616a;">Stopped:</span><span> Sat Apr  1 15:54:05 2023
+</span><span>
+</span><span style="color:#bf616a;">real</span><span> 0m23,617s
+</span><span style="color:#bf616a;">user</span><span> 0m6,331s
+</span><span style="color:#bf616a;">sys</span><span>  0m10,747s
+</span></code></pre>
+<p>That's a lot of logs; each bloc represents the outcome of the exploration of length-value space.</p>
+<p>In any case, it found the password in 23 seconds, two times faster than <code>zip-password-finder</code>!</p>
+<p>At peak speed, it processed <code>49139 H/s</code> which is roughly 10 times faster than <code>zip-password-finder</code> on my configuration.</p>
+<p>It does so while still complaining about not being able to fully use the system.</p>
+<p>For this reason, I expect the difference between the two tools to be much larger with a larger password.</p>
+<p>Especially if you have a real graphics card, the throughput will likely be expressed in <code>MH</code>.</p>
+<p>Hashcat is a fantastic tool with great performance; it was however not easy to setup, so it may be reserved for advanced users.</p>
+<h2 id="future-work">Future work</h2>
+<p>The re-architecturing has not solved the scaling issues; it would be interesting to dig deeper and benchmark the code on a machine with a much larger number of cores.</p>
+<p>Talking about testing different hardware, it would be great to have results using a CPU with the <code>sha</code> instruction to benefit from proper hardware acceleration.</p>
+<p>Being able to speed up the default implementation of the <code>sha1</code> crate would also yield significant gains.</p>
+<p>A current issue is the accumulation of technical debt; by contributing the AES info extraction helpers upstream to the <code>zip-rs</code>, we would avoid having to maintain a fork forever.</p>
+<p>Finally, Hashcat has made a great impression, and I would like to explore it for further inspiration.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>This article has explained a few performance optimizations that helped making <code>zip-password-finder</code> a bit faster over time.</p>
+<p>However, it has also highlighted that the recent efforts have entered a zone of diminishing returns due to a clear bottleneck.</p>
+<p>It seems cracking hashes requires dedicated hardware: be it CPUs with particular instructions or even better GPUs.</p>
+<p>This has been made somewhat clear by comparing our Rust program to the great Hashcat.</p>
+<p>In general, expert tooling tends to perform very well but suffers from an accessibility issue.</p>
+<p>The project <code>zip-password-finder</code> is very easy to use but has a long way to go to be competitive.</p>
+
+    </div>
+
+    
+    <div class="article-info">
+        
+        <div class="article-date"> 3 April 2023</div>
+        
+        <div class="article-taxonomies">
+            
+            
+                <ul class="article-tags">
+                    
+                    <li><a href=" https://agourlay.github.io/tags/rust/">#Rust</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/security/">#security</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/multithreading/">#multithreading</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/benchmarking/">#benchmarking</a></li>
+                    
+                </ul>
+            
+        </div>
+    </div>
+
+</article>
+
+
+        </main>
+        <footer>
+            <p>
+                © Arnaud Gourlay&#x27;s blog 2025<br>
+                Powered by <a target="_blank" href="https://getzola.org/">Zola</a>, Theme <a target="_blank" href="https://github.com/zbrox/anpu-zola-theme">Anpu</a>.
+            </p>
+            <p>
+                
+                
+            </p>
+        </footer>
+    </div>
+
+    <div class="dark-mode-buttons">
+  <button class="dark-mode-button" id="dark-mode-on">
+    <img
+      src=" https://agourlay.github.io/dark_mode.svg"
+      width="24"
+      height="24"
+      alt="Dark mode"
+      aria-label="dark mode toggle"
+      title="Dark mode"
+    />
+  </button>
+  <button class="dark-mode-button" id="dark-mode-off">
+    <img
+      src=" https://agourlay.github.io/light_mode.svg "
+      width="24"
+      height="24"
+      alt="Light mode"
+      aria-label="light mode toggle"
+      title="Light mode"
+      style="filter: invert(1);"
+    />
+  </button>
+</div>
+<script>
+  const cls = document.body.classList;
+  const getSessionTheme = sessionStorage.getItem("theme");
+  if (getSessionTheme === "dark") {
+    cls.toggle("dark-mode", true);
+  } else if (getSessionTheme === "light") {
+    cls.toggle("dark-mode", false);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    cls.toggle("dark-mode", true);
+  }
+  document
+    .getElementById("dark-mode-on")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", true);
+      sessionStorage.setItem("theme", "dark");
+    });
+  document
+    .getElementById("dark-mode-off")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", false);
+      sessionStorage.setItem("theme", "light");
+    });
+</script>
+<noscript>
+  <style>
+    .dark-mode-buttons {
+      display: none;
+    }
+  </style>
+</noscript>
+
+    
+</body>
+</html>

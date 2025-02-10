@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+
+    <title>Support for thread dump in hprof-slurp 0.5.0</title>
+    <meta name="description" content="Yet another programming blog">
+
+    <link rel="stylesheet" href=" https://agourlay.github.io/main.css">
+
+    
+        <link rel="alternate" type="application/atom+xml" title="RSS" href=" https://agourlay.github.io/atom.xml">
+    
+
+    
+    
+</head>
+<body>
+    <a class="skip-main" href="#main">Skip to content</a>
+    <div class="container">
+        <header> 
+            <h1 class="site-header">
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io">Arnaud Gourlay&#x27;s blog</a>
+            </h1>
+            <nav>
+                
+                
+                
+                <a  href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;">Tags</a>
+                
+                
+                <a  href="&#x2F;pages&#x2F;about">About</a>
+                
+                
+            </nav>
+        </header>
+        <main id="main" tabindex="-1">
+            
+
+<article class="post">
+    <header>
+        <h1>Support for thread dump in hprof-slurp 0.5.0</h1>
+    </header>
+    <div class="content">
+        <p>This short article is an announcement for the <a href="https://github.com/agourlay/hprof-slurp/releases/tag/v0.5.0">0.5.0</a> release of the <a href="https://github.com/agourlay/hprof-slurp">hprof-slurp</a> project.</p>
+<p>The goal of this project is to build a JVM heap dump analyzer written in Rust specialized for very large heap dumps.</p>
+<p>This release introduces the support for reporting the traces of the threads found in the heap dump.</p>
+<p>Meaning, users can now see which part of their application was running at the time of the dump!</p>
+<p>It is achieved by stitching together the stacktrace and stackframe data into a coherent output at the end of the parsing phase.</p>
+<p>It may slightly increase the memory consumption at runtime due to the additional data captured.</p>
+<p>There is still room for improvement as important pieces of information are missing, such as the name of the thread and its <a href="https://docs.oracle.com/en/java/javase/18/docs/api/java.base/java/lang/Thread.State.html">Java Thread.State</a>.</p>
+<p>However, the addition of this feature is a net improvement over what was previously possible and will hopefully help users during their investigations.</p>
+<p>All non-empty threads's stacktraces are reported and their format should be compatible with existing tools, such as the <code>Analyze stacktrace</code> feature in Intellij IDEA for convenience.</p>
+<h2 id="example">Example</h2>
+<p>I will use the <code>pets.bin</code> dump file introduced in a previous benchmarking <a href="https://agourlay.github.io/rust-performance-retrospective-part1/">article</a>.</p>
+<p>This is a 34Gb heap dump taken while hammering a running instance of <a href="https://github.com/spring-petclinic/spring-petclinic-rest">Spring's REST petclinic</a>.</p>
+<p>The thread dump feature is on by default, the analysis of <code>pets.bin</code> outputs a total of 224 stacktraces.</p>
+<p>Below is the longest I could find for fun.</p>
+<pre data-lang="txt" style="background-color:#2b303b;color:#c0c5ce;" class="language-txt "><code class="language-txt" data-lang="txt"><span>Thread 222
+</span><span>  at jdk.internal.misc.Unsafe.park (Unsafe.java:native method)
+</span><span>  at java.util.concurrent.locks.LockSupport.parkNanos (LockSupport.java:252)
+</span><span>  at java.util.concurrent.SynchronousQueue$TransferQueue.transfer (SynchronousQueue.java:704)
+</span><span>  at java.util.concurrent.SynchronousQueue.poll (SynchronousQueue.java:903)
+</span><span>  at com.zaxxer.hikari.util.ConcurrentBag.borrow (ConcurrentBag.java:151)
+</span><span>  at com.zaxxer.hikari.pool.HikariPool.getConnection (HikariPool.java:180)
+</span><span>  at com.zaxxer.hikari.pool.HikariPool.getConnection (HikariPool.java:162)
+</span><span>  at com.zaxxer.hikari.HikariDataSource.getConnection (HikariDataSource.java:128)
+</span><span>  at org.hibernate.engine.jdbc.connections.internal.DatasourceConnectionProviderImpl.getConnection (DatasourceConnectionProviderImpl.java:122)
+</span><span>  at org.hibernate.internal.NonContextualJdbcConnectionAccess.obtainConnection (NonContextualJdbcConnectionAccess.java:38)
+</span><span>  at org.hibernate.resource.jdbc.internal.LogicalConnectionManagedImpl.acquireConnectionIfNeeded (LogicalConnectionManagedImpl.java:108)
+</span><span>  at org.hibernate.resource.jdbc.internal.LogicalConnectionManagedImpl.getPhysicalConnection (LogicalConnectionManagedImpl.java:138)
+</span><span>  at org.hibernate.internal.SessionImpl.connection (SessionImpl.java:520)
+</span><span>  at org.springframework.orm.jpa.vendor.HibernateJpaDialect.beginTransaction (HibernateJpaDialect.java:152)
+</span><span>  at org.springframework.orm.jpa.JpaTransactionManager.doBegin (JpaTransactionManager.java:421)
+</span><span>  at org.springframework.transaction.support.AbstractPlatformTransactionManager.startTransaction (AbstractPlatformTransactionManager.java:400)
+</span><span>  at org.springframework.transaction.support.AbstractPlatformTransactionManager.getTransaction (AbstractPlatformTransactionManager.java:373)
+</span><span>  at org.springframework.transaction.interceptor.TransactionAspectSupport.createTransactionIfNecessary (TransactionAspectSupport.java:595)
+</span><span>  at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction (TransactionAspectSupport.java:382)
+</span><span>  at org.springframework.transaction.interceptor.TransactionInterceptor.invoke (TransactionInterceptor.java:119)
+</span><span>  at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed (ReflectiveMethodInvocation.java:186)
+</span><span>  at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed (CglibAopProxy.java:753)
+</span><span>  at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept (CglibAopProxy.java:698)
+</span><span>  at org.springframework.samples.petclinic.service.ClinicServiceImpl$$EnhancerBySpringCGLIB$$a06977e9.findAllVisits (&lt;generated&gt;:unknown line number)
+</span><span>  at org.springframework.samples.petclinic.rest.controller.VisitRestController.listVisits (VisitRestController.java:60)
+</span><span>  at org.springframework.samples.petclinic.rest.controller.VisitRestController$$FastClassBySpringCGLIB$$8641bcb0.invoke (&lt;generated&gt;:unknown line number)
+</span><span>  at org.springframework.cglib.proxy.MethodProxy.invoke (MethodProxy.java:218)
+</span><span>  at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.invokeJoinpoint (CglibAopProxy.java:783)
+</span><span>  at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed (ReflectiveMethodInvocation.java:163)
+</span><span>  at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed (CglibAopProxy.java:753)
+</span><span>  at org.springframework.validation.beanvalidation.MethodValidationInterceptor.invoke (MethodValidationInterceptor.java:123)
+</span><span>  at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed (ReflectiveMethodInvocation.java:186)
+</span><span>  at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed (CglibAopProxy.java:753)
+</span><span>  at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept (CglibAopProxy.java:698)
+</span><span>  at org.springframework.samples.petclinic.rest.controller.VisitRestController$$EnhancerBySpringCGLIB$$2bf2b676.listVisits (&lt;generated&gt;:unknown line number)
+</span><span>  at jdk.internal.reflect.NativeMethodAccessorImpl.invoke0 (NativeMethodAccessorImpl.java:native method)
+</span><span>  at jdk.internal.reflect.NativeMethodAccessorImpl.invoke (NativeMethodAccessorImpl.java:77)
+</span><span>  at jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke (DelegatingMethodAccessorImpl.java:43)
+</span><span>  at java.lang.reflect.Method.invoke (Method.java:568)
+</span><span>  at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke (InvocableHandlerMethod.java:205)
+</span><span>  at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest (InvocableHandlerMethod.java:150)
+</span><span>  at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle (ServletInvocableHandlerMethod.java:117)
+</span><span>  at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod (RequestMappingHandlerAdapter.java:895)
+</span><span>  at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal (RequestMappingHandlerAdapter.java:808)
+</span><span>  at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle (AbstractHandlerMethodAdapter.java:87)
+</span><span>  at org.springframework.web.servlet.DispatcherServlet.doDispatch (DispatcherServlet.java:1067)
+</span><span>  at org.springframework.web.servlet.DispatcherServlet.doService (DispatcherServlet.java:963)
+</span><span>  at org.springframework.web.servlet.FrameworkServlet.processRequest (FrameworkServlet.java:1006)
+</span><span>  at org.springframework.web.servlet.FrameworkServlet.doGet (FrameworkServlet.java:898)
+</span><span>  at javax.servlet.http.HttpServlet.service (HttpServlet.java:655)
+</span><span>  at org.springframework.web.servlet.FrameworkServlet.service (FrameworkServlet.java:883)
+</span><span>  at javax.servlet.http.HttpServlet.service (HttpServlet.java:764)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter (ApplicationFilterChain.java:227)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.doFilter (ApplicationFilterChain.java:162)
+</span><span>  at org.apache.tomcat.websocket.server.WsFilter.doFilter (WsFilter.java:53)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter (ApplicationFilterChain.java:189)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.doFilter (ApplicationFilterChain.java:162)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:327)
+</span><span>  at org.springframework.security.web.access.intercept.FilterSecurityInterceptor.invoke (FilterSecurityInterceptor.java:115)
+</span><span>  at org.springframework.security.web.access.intercept.FilterSecurityInterceptor.doFilter (FilterSecurityInterceptor.java:81)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.access.ExceptionTranslationFilter.doFilter (ExceptionTranslationFilter.java:122)
+</span><span>  at org.springframework.security.web.access.ExceptionTranslationFilter.doFilter (ExceptionTranslationFilter.java:116)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.session.SessionManagementFilter.doFilter (SessionManagementFilter.java:126)
+</span><span>  at org.springframework.security.web.session.SessionManagementFilter.doFilter (SessionManagementFilter.java:81)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.authentication.AnonymousAuthenticationFilter.doFilter (AnonymousAuthenticationFilter.java:109)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter.doFilter (SecurityContextHolderAwareRequestFilter.java:149)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.savedrequest.RequestCacheAwareFilter.doFilter (RequestCacheAwareFilter.java:63)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.authentication.logout.LogoutFilter.doFilter (LogoutFilter.java:103)
+</span><span>  at org.springframework.security.web.authentication.logout.LogoutFilter.doFilter (LogoutFilter.java:89)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.header.HeaderWriterFilter.doHeadersAfter (HeaderWriterFilter.java:90)
+</span><span>  at org.springframework.security.web.header.HeaderWriterFilter.doFilterInternal (HeaderWriterFilter.java:75)
+</span><span>  at org.springframework.web.filter.OncePerRequestFilter.doFilter (OncePerRequestFilter.java:117)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.context.SecurityContextPersistenceFilter.doFilter (SecurityContextPersistenceFilter.java:110)
+</span><span>  at org.springframework.security.web.context.SecurityContextPersistenceFilter.doFilter (SecurityContextPersistenceFilter.java:80)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter.doFilterInternal (WebAsyncManagerIntegrationFilter.java:55)
+</span><span>  at org.springframework.web.filter.OncePerRequestFilter.doFilter (OncePerRequestFilter.java:117)
+</span><span>  at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter (FilterChainProxy.java:336)
+</span><span>  at org.springframework.security.web.FilterChainProxy.doFilterInternal (FilterChainProxy.java:211)
+</span><span>  at org.springframework.security.web.FilterChainProxy.doFilter (FilterChainProxy.java:183)
+</span><span>  at org.springframework.web.filter.DelegatingFilterProxy.invokeDelegate (DelegatingFilterProxy.java:354)
+</span><span>  at org.springframework.web.filter.DelegatingFilterProxy.doFilter (DelegatingFilterProxy.java:267)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter (ApplicationFilterChain.java:189)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.doFilter (ApplicationFilterChain.java:162)
+</span><span>  at org.springframework.web.filter.RequestContextFilter.doFilterInternal (RequestContextFilter.java:100)
+</span><span>  at org.springframework.web.filter.OncePerRequestFilter.doFilter (OncePerRequestFilter.java:117)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter (ApplicationFilterChain.java:189)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.doFilter (ApplicationFilterChain.java:162)
+</span><span>  at org.springframework.web.filter.FormContentFilter.doFilterInternal (FormContentFilter.java:93)
+</span><span>  at org.springframework.web.filter.OncePerRequestFilter.doFilter (OncePerRequestFilter.java:117)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter (ApplicationFilterChain.java:189)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.doFilter (ApplicationFilterChain.java:162)
+</span><span>  at org.springframework.boot.actuate.metrics.web.servlet.WebMvcMetricsFilter.doFilterInternal (WebMvcMetricsFilter.java:96)
+</span><span>  at org.springframework.web.filter.OncePerRequestFilter.doFilter (OncePerRequestFilter.java:117)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter (ApplicationFilterChain.java:189)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.doFilter (ApplicationFilterChain.java:162)
+</span><span>  at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal (CharacterEncodingFilter.java:201)
+</span><span>  at org.springframework.web.filter.OncePerRequestFilter.doFilter (OncePerRequestFilter.java:117)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter (ApplicationFilterChain.java:189)
+</span><span>  at org.apache.catalina.core.ApplicationFilterChain.doFilter (ApplicationFilterChain.java:162)
+</span><span>  at org.apache.catalina.core.StandardWrapperValve.invoke (StandardWrapperValve.java:197)
+</span><span>  at org.apache.catalina.core.StandardContextValve.invoke (StandardContextValve.java:97)
+</span><span>  at org.apache.catalina.authenticator.AuthenticatorBase.invoke (AuthenticatorBase.java:540)
+</span><span>  at org.apache.catalina.core.StandardHostValve.invoke (StandardHostValve.java:135)
+</span><span>  at org.apache.catalina.valves.ErrorReportValve.invoke (ErrorReportValve.java:92)
+</span><span>  at org.apache.catalina.core.StandardEngineValve.invoke (StandardEngineValve.java:78)
+</span><span>  at org.apache.catalina.connector.CoyoteAdapter.service (CoyoteAdapter.java:357)
+</span><span>  at org.apache.coyote.http11.Http11Processor.service (Http11Processor.java:382)
+</span><span>  at org.apache.coyote.AbstractProcessorLight.process (AbstractProcessorLight.java:65)
+</span><span>  at org.apache.coyote.AbstractProtocol$ConnectionHandler.process (AbstractProtocol.java:895)
+</span><span>  at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun (NioEndpoint.java:1732)
+</span><span>  at org.apache.tomcat.util.net.SocketProcessorBase.run (SocketProcessorBase.java:49)
+</span><span>  at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker (ThreadPoolExecutor.java:1191)
+</span><span>  at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run (ThreadPoolExecutor.java:659)
+</span><span>  at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run (TaskThread.java:61)
+</span><span>  at java.lang.Thread.run (Thread.java:833)
+</span></code></pre>
+
+    </div>
+
+    
+    <div class="article-info">
+        
+        <div class="article-date">17 October 2022</div>
+        
+        <div class="article-taxonomies">
+            
+            
+                <ul class="article-tags">
+                    
+                    <li><a href=" https://agourlay.github.io/tags/hprof-slurp/">#hprof-slurp</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/release/">#release</a></li>
+                    
+                </ul>
+            
+        </div>
+    </div>
+
+</article>
+
+
+        </main>
+        <footer>
+            <p>
+                © Arnaud Gourlay&#x27;s blog 2025<br>
+                Powered by <a target="_blank" href="https://getzola.org/">Zola</a>, Theme <a target="_blank" href="https://github.com/zbrox/anpu-zola-theme">Anpu</a>.
+            </p>
+            <p>
+                
+                
+            </p>
+        </footer>
+    </div>
+
+    <div class="dark-mode-buttons">
+  <button class="dark-mode-button" id="dark-mode-on">
+    <img
+      src=" https://agourlay.github.io/dark_mode.svg"
+      width="24"
+      height="24"
+      alt="Dark mode"
+      aria-label="dark mode toggle"
+      title="Dark mode"
+    />
+  </button>
+  <button class="dark-mode-button" id="dark-mode-off">
+    <img
+      src=" https://agourlay.github.io/light_mode.svg "
+      width="24"
+      height="24"
+      alt="Light mode"
+      aria-label="light mode toggle"
+      title="Light mode"
+      style="filter: invert(1);"
+    />
+  </button>
+</div>
+<script>
+  const cls = document.body.classList;
+  const getSessionTheme = sessionStorage.getItem("theme");
+  if (getSessionTheme === "dark") {
+    cls.toggle("dark-mode", true);
+  } else if (getSessionTheme === "light") {
+    cls.toggle("dark-mode", false);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    cls.toggle("dark-mode", true);
+  }
+  document
+    .getElementById("dark-mode-on")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", true);
+      sessionStorage.setItem("theme", "dark");
+    });
+  document
+    .getElementById("dark-mode-off")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", false);
+      sessionStorage.setItem("theme", "light");
+    });
+</script>
+<noscript>
+  <style>
+    .dark-mode-buttons {
+      display: none;
+    }
+  </style>
+</noscript>
+
+    
+</body>
+</html>

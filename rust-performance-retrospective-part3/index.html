@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+
+    <title>A performance retrospective using Rust (part 3)</title>
+    <meta name="description" content="Yet another programming blog">
+
+    <link rel="stylesheet" href=" https://agourlay.github.io/main.css">
+
+    
+        <link rel="alternate" type="application/atom+xml" title="RSS" href=" https://agourlay.github.io/atom.xml">
+    
+
+    
+    
+</head>
+<body>
+    <a class="skip-main" href="#main">Skip to content</a>
+    <div class="container">
+        <header> 
+            <h1 class="site-header">
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io">Arnaud Gourlay&#x27;s blog</a>
+            </h1>
+            <nav>
+                
+                
+                
+                <a  href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;">Tags</a>
+                
+                
+                <a  href="&#x2F;pages&#x2F;about">About</a>
+                
+                
+            </nav>
+        </header>
+        <main id="main" tabindex="-1">
+            
+
+<article class="post">
+    <header>
+        <h1>A performance retrospective using Rust (part 3)</h1>
+    </header>
+    <div class="content">
+        <p>This article is the third part of a performance retrospective regarding the <a href="https://github.com/agourlay/hprof-slurp">hprof-slurp</a> project.</p>
+<p>It is highly recommended to start with the <a href="/rust-performance-retrospective-part1/">first part</a> to get a good grasp of the context.</p>
+<p>In this edition, we will focus on an arguably minor performance issue that will teach us a bit more about Rust along the way.</p>
+<p>A short disclaimer: this article has been written using Rust 1.62.1 and its conclusions might not be valid in the future.</p>
+<h2 id="try-trait">Try trait</h2>
+<p>As usual, our investigation is prompted by a strange artefact in a flamegraph.</p>
+<p>Below - in purple - you can see <code>core::ops::try_trait::Try&gt;::branch</code> represents 8.5% of the work in the parser thread (full <a href="/2022-08-08/flamegraph-try-branch.svg">flamegraph</a>).</p>
+<p><img src="/2022-08-08/flamegraph-try-branch.png" alt="Flamegraph with try" /></p>
+<p>You should know by now that the parser thread is the bottleneck for the whole application. It needs to be as fast as possible.</p>
+<p>Therefore, every bit of computation happening on it must be accounted for.</p>
+<p>In this case, the slowness seemed to be caused by the <code>Try</code> trait, which does not appear in the code base explicitly.</p>
+<p>Our best chance is to simply look at the Rust doc for the <a href="https://doc.rust-lang.org/stable/core/ops/trait.Try.html#tymethod.branch">branch</a> method.</p>
+<p><img src="/2022-08-08/branch-doc.png" alt="Try::branch docs" /></p>
+<p>Alright, so this function is a 'nightly-only experimental' API and is called every time the operator <code>?</code> is used on something that implements the <code>Try</code> trait.</p>
+<p>The only possible implementations when using stable Rust are found in the standard library.</p>
+<p><img src="/2022-08-08/try-implementors.png" alt="Try implementor docs" /></p>
+<p>In our case the culprit must be the <code>Result</code> type which is used to track the errors occurring during the parsing phase.</p>
+<p>After some digging, I found an existing <a href="https://github.com/rust-lang/rust/issues/37939">issue</a> on Github appropriately named <code>Reduced performance when using question mark operator instead of try!</code> where several users are reporting similar experiences.</p>
+<p>The issue seems to be a bit stale, so we are going to use a workaround this time.</p>
+<h2 id="workaround">Workaround</h2>
+<p>If the question mark operator is having an impact on the performance, the most logical step is to not use it.</p>
+<p>The previous flamegraph points us to the <code>parse_hprof_record</code> function where we will start by replacing <code>?</code> with combinators on <code>Result</code>.</p>
+<p>The first change uses <code>Result::and_then</code> to chain two results:</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span>     pub fn parse_hprof_record(&amp;mut self) -&gt; impl FnMut(&amp;[u8]) -&gt; IResult&lt;&amp;[u8], Record&gt; + &#39;_ {
+</span><span>         |i| {
+</span><span>             if self.heap_dump_remaining_len == 0 {
+</span><span style="color:#bf616a;">-                let (r1, tag) = parse_u8(i)?;
+</span><span style="color:#bf616a;">-                if self.debug_mode {
+</span><span style="color:#bf616a;">-                    println!(&quot;Found record tag:{} remaining bytes:{}&quot;, tag, i.len());
+</span><span style="color:#bf616a;">-                }
+</span><span style="color:#bf616a;">-                match tag {
+</span><span style="color:#bf616a;">-                    TAG_STRING =&gt; parse_utf8_string(r1),
+</span><span style="color:#bf616a;">-                    TAG_LOAD_CLASS =&gt; parse_load_class(r1),
+</span><span style="color:#bf616a;">-                    TAG_UNLOAD_CLASS =&gt; parse_unload_class(r1),
+</span><span style="color:#bf616a;">-                    TAG_STACK_FRAME =&gt; parse_stack_frame(r1),
+</span><span style="color:#bf616a;">-                    TAG_STACK_TRACE =&gt; parse_stack_trace(r1),
+</span><span style="color:#bf616a;">-                    TAG_ALLOC_SITES =&gt; parse_allocation_sites(r1),
+</span><span style="color:#bf616a;">-                    TAG_HEAP_SUMMARY =&gt; parse_heap_summary(r1),
+</span><span style="color:#bf616a;">-                    TAG_START_THREAD =&gt; parse_start_thread(r1),
+</span><span style="color:#bf616a;">-                    TAG_END_THREAD =&gt; parse_end_thread(r1),
+</span><span style="color:#bf616a;">-                    TAG_CONTROL_SETTING =&gt; parse_control_settings(r1),
+</span><span style="color:#bf616a;">-                    TAG_CPU_SAMPLES =&gt; parse_cpu_samples(r1),
+</span><span style="color:#bf616a;">-                    TAG_HEAP_DUMP_END =&gt; parse_heap_dump_end(r1),
+</span><span style="color:#bf616a;">-                    TAG_HEAP_DUMP | TAG_HEAP_DUMP_SEGMENT =&gt; {
+</span><span style="color:#bf616a;">-                        map(parse_header_record, |hr| {
+</span><span style="color:#bf616a;">-                            // record expected GC segments length
+</span><span style="color:#bf616a;">-                            self.heap_dump_remaining_len = hr.length;
+</span><span style="color:#bf616a;">-                            HeapDumpStart { length: hr.length }
+</span><span style="color:#bf616a;">-                        })(r1)
+</span><span style="color:#a3be8c;">+                parse_u8(i).and_then(|(r1, tag)| {
+</span><span style="color:#a3be8c;">+                    if self.debug_mode {
+</span><span style="color:#a3be8c;">+                        println!(&quot;Found record tag:{} remaining bytes:{}&quot;, tag, i.len());
+</span><span style="color:#a3be8c;">+                    }
+</span><span style="color:#a3be8c;">+                    match tag {
+</span><span style="color:#a3be8c;">+                        TAG_STRING =&gt; parse_utf8_string(r1),
+</span><span style="color:#a3be8c;">+                        TAG_LOAD_CLASS =&gt; parse_load_class(r1),
+</span><span style="color:#a3be8c;">+                        TAG_UNLOAD_CLASS =&gt; parse_unload_class(r1),
+</span><span style="color:#a3be8c;">+                        TAG_STACK_FRAME =&gt; parse_stack_frame(r1),
+</span><span style="color:#a3be8c;">+                        TAG_STACK_TRACE =&gt; parse_stack_trace(r1),
+</span><span style="color:#a3be8c;">+                        TAG_ALLOC_SITES =&gt; parse_allocation_sites(r1),
+</span><span style="color:#a3be8c;">+                        TAG_HEAP_SUMMARY =&gt; parse_heap_summary(r1),
+</span><span style="color:#a3be8c;">+                        TAG_START_THREAD =&gt; parse_start_thread(r1),
+</span><span style="color:#a3be8c;">+                        TAG_END_THREAD =&gt; parse_end_thread(r1),
+</span><span style="color:#a3be8c;">+                        TAG_CONTROL_SETTING =&gt; parse_control_settings(r1),
+</span><span style="color:#a3be8c;">+                        TAG_CPU_SAMPLES =&gt; parse_cpu_samples(r1),
+</span><span style="color:#a3be8c;">+                        TAG_HEAP_DUMP_END =&gt; parse_heap_dump_end(r1),
+</span><span style="color:#a3be8c;">+                        TAG_HEAP_DUMP | TAG_HEAP_DUMP_SEGMENT =&gt; {
+</span><span style="color:#a3be8c;">+                            map(parse_header_record, |hr| {
+</span><span style="color:#a3be8c;">+                                // record expected GC segments length
+</span><span style="color:#a3be8c;">+                                self.heap_dump_remaining_len = hr.length;
+</span><span style="color:#a3be8c;">+                                HeapDumpStart { length: hr.length }
+</span><span style="color:#a3be8c;">+                            })(r1)
+</span><span style="color:#a3be8c;">+                        }
+</span><span style="color:#a3be8c;">+                        x =&gt; panic!(&quot;{}&quot;, format!(&quot;unhandled record tag {}&quot;, x)),
+</span><span>                     }
+</span><span style="color:#bf616a;">-                    x =&gt; panic!(&quot;{}&quot;, format!(&quot;unhandled record tag {}&quot;, x)),
+</span><span style="color:#bf616a;">-                }                     
+</span><span style="color:#a3be8c;">+                })
+</span></code></pre>
+<p>And a second change using <code>Result::map</code>:</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span>             } else {
+</span><span>                 // GC record mode
+</span><span style="color:#bf616a;">-                let (r1, gc_sub) = parse_gc_record(i)?;
+</span><span style="color:#bf616a;">-                let gc_sub_len = i.len() - r1.len();
+</span><span style="color:#bf616a;">-                self.heap_dump_remaining_len -= gc_sub_len as u32;
+</span><span style="color:#bf616a;">-                Ok((r1, GcSegment(gc_sub)))
+</span><span style="color:#a3be8c;">+                parse_gc_record(i).map(|(r1, gc_sub)| {
+</span><span style="color:#a3be8c;">+                    let gc_sub_len = i.len() - r1.len();
+</span><span style="color:#a3be8c;">+                    self.heap_dump_remaining_len -= gc_sub_len as u32;
+</span><span style="color:#a3be8c;">+                    (r1, GcSegment(gc_sub))
+</span><span style="color:#a3be8c;">+                })
+</span><span>             }
+</span><span>         }
+</span><span>     }
+</span><span>
+</span></code></pre>
+<p>After applying those two changes, we can indeed see that <code>core::ops::try_trait::Try&gt;::branch</code> now represents only 0.5% of time in a different call stack.</p>
+<p><img src="/2022-08-08/flamegraph-after-fix.png" alt="Flamegraph after fix" /></p>
+<p>Most of it now comes from <code>nom::combinator::flat_map</code> and when zooming in we can also find a tiny contribution from <code>nom::combinator::map</code>.</p>
+<p><img src="/2022-08-08/flamegraph-after-fix-extra.png" alt="Flamegraph after fix zoom" /></p>
+<p>The previous occurence of <code>core::ops::try_trait::Try&gt;::branch</code> has been replaced by <code>Result::map</code> which informs us that our second change is executed more often.</p>
+<p>Observing flamegraphs is nice but does it translate into runtime performance gains?</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hyperfine --runs</span><span> 10 \
+</span><span style="color:#bf616a;"> --warmup</span><span> 5 \
+</span><span style="color:#bf616a;"> --export-markdown</span><span> hprof.md \
+</span><span style="color:#bf616a;"> -n</span><span> with-? &quot;</span><span style="color:#a3be8c;">./hprof-slurp-with-? -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> with-combinators &quot;</span><span style="color:#a3be8c;">./hprof-slurp-combinators -i pets.bin</span><span>&quot;
+</span></code></pre>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>with-?</code></td><td style="text-align: right">36.614 ± 0.138</td><td style="text-align: right">36.373</td><td style="text-align: right">36.835</td><td style="text-align: right">1.04 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>with-combinators</code></td><td style="text-align: right">35.062 ± 0.766</td><td style="text-align: right">34.202</td><td style="text-align: right">35.969</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>Using the question mark operator is 4% slower than the combinators version on this run.</p>
+<p>That is not a massive improvement, but I think it is a reasonable trade-off given the change applied and the application's context.</p>
+<h2 id="going-deeper">Going deeper</h2>
+<p>We can go deeper by applying the same tricks to <code>nom</code> to see if we can scrape some additional gains.</p>
+<p>Let's clone the repository and apply the following changes.</p>
+<p>First on the <code>flat_map</code> combinator.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span>pub fn flat_map&lt;I, O1, O2, E: ParseError&lt;I&gt;, F, G, H&gt;(
+</span><span>  mut parser: F,
+</span><span>  mut applied_parser: G,
+</span><span>) -&gt; impl FnMut(I) -&gt; IResult&lt;I, O2, E&gt;
+</span><span>where
+</span><span>  F: Parser&lt;I, O1, E&gt;,
+</span><span>  G: FnMut(O1) -&gt; H,
+</span><span>  H: Parser&lt;I, O2, E&gt;,
+</span><span>{
+</span><span>   move |input: I| {
+</span><span style="color:#bf616a;">-    let (input, o1) = parser.parse(input)?;
+</span><span style="color:#bf616a;">-    applied_parser(o1).parse(input)
+</span><span style="color:#a3be8c;">+    parser
+</span><span style="color:#a3be8c;">+      .parse(input)
+</span><span style="color:#a3be8c;">+      .and_then(|(input, o1)| applied_parser(o1).parse(input))
+</span><span>   }
+</span><span>}
+</span></code></pre>
+<p>And then for the <code>map</code> combinator.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span>pub fn map&lt;I, O1, O2, E, F, G&gt;(mut parser: F, mut f: G) -&gt; impl FnMut(I) -&gt; IResult&lt;I, O2, E&gt;
+</span><span>where
+</span><span>  F: Parser&lt;I, O1, E&gt;,
+</span><span>  G: FnMut(O1) -&gt; O2,
+</span><span>{
+</span><span style="color:#bf616a;">-  move |input: I| {
+</span><span style="color:#bf616a;">-    let (input, o1) = parser.parse(input)?;
+</span><span style="color:#bf616a;">-    Ok((input, f(o1)))
+</span><span style="color:#bf616a;">-  }
+</span><span style="color:#a3be8c;">+  move |input: I| parser.parse(input).map(|(input, o1)| (input, f(o1)))
+</span><span>
+</span><span>}
+</span></code></pre>
+<p>In order to use our local patched version of <code>nom</code>, we simply need to tell Cargo about it.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span> [dependencies]
+</span><span style="color:#bf616a;">-nom = &quot;7.1.1&quot;
+</span><span style="color:#a3be8c;">+nom = { path = &quot;../nom&quot; }
+</span></code></pre>
+<p>This is a pretty neat feature from Cargo which enables quick experiments!</p>
+<p>After validating that the flamegraph is now free from any traces of <code>branch</code> (trust me on this one, there are enough screenshots in this article), we can run a final benchmark.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hyperfine --runs</span><span> 10 \
+</span><span style="color:#bf616a;"> --warmup</span><span> 5 \
+</span><span style="color:#bf616a;"> --export-markdown</span><span> hprof.md \
+</span><span style="color:#bf616a;"> -n</span><span> with-? &quot;</span><span style="color:#a3be8c;">./hprof-slurp-with-? -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> with-combinators &quot;</span><span style="color:#a3be8c;">./hprof-slurp-combinators -i pets.bin</span><span>&quot;
+</span><span> </span><span style="color:#bf616a;">-n</span><span> with-nom-combinators &quot;</span><span style="color:#a3be8c;">./hprof-slurp-combinators -i pets.bin</span><span>&quot;
+</span></code></pre>
+<p>I re-ran the benchmark several times and the result is that the gain of the <code>nom</code> patch is more often 0% than 1%.</p>
+<p>It is more or less what we could expect from optimizing a chunk of code accounting for 0.5% of the CPU time.</p>
+<p>This means it is not worth it to make a PR to upstream the performance patch as we do not have enough data to back it up with.</p>
+<p>An important aspect of performance work is that diminishing returns can occur quickly. Therefore, knowing when to stop digging in the same spot is essential.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>In this article, we have learned that the question mark operator can have an impact on the runtime performance of a program.</p>
+<p>How much of an impact, however,  depends on the exact workload of the program and where the operator is used.</p>
+<p>It seems reasonable to believe that this behaviour should not be an issue for the majority of Rust programs out there where the question mark operator is not used to shortcut very hot code.</p>
+<p>As always, it is good to benchmark instead of making assumptions, which could lead to making the code less readable without concrete gains.</p>
+<p>The next article in this <a href="/categories/series/">series</a> will go through another interesting optimization encountered while making <code>hprof-slurp</code> faster.</p>
+
+    </div>
+
+    
+    <div class="article-info">
+        
+        <div class="article-date"> 8 August 2022</div>
+        
+        <div class="article-taxonomies">
+            
+                <ul class="article-categories">
+                    
+                    <li><a href=" https://agourlay.github.io/categories/series/">series</a></li>
+                    
+                </ul>
+            
+            
+                <ul class="article-tags">
+                    
+                    <li><a href=" https://agourlay.github.io/tags/rust/">#Rust</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/performance/">#performance</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/hprof-slurp/">#hprof-slurp</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/try-trait/">#try_trait</a></li>
+                    
+                </ul>
+            
+        </div>
+    </div>
+
+</article>
+
+
+        </main>
+        <footer>
+            <p>
+                © Arnaud Gourlay&#x27;s blog 2025<br>
+                Powered by <a target="_blank" href="https://getzola.org/">Zola</a>, Theme <a target="_blank" href="https://github.com/zbrox/anpu-zola-theme">Anpu</a>.
+            </p>
+            <p>
+                
+                
+            </p>
+        </footer>
+    </div>
+
+    <div class="dark-mode-buttons">
+  <button class="dark-mode-button" id="dark-mode-on">
+    <img
+      src=" https://agourlay.github.io/dark_mode.svg"
+      width="24"
+      height="24"
+      alt="Dark mode"
+      aria-label="dark mode toggle"
+      title="Dark mode"
+    />
+  </button>
+  <button class="dark-mode-button" id="dark-mode-off">
+    <img
+      src=" https://agourlay.github.io/light_mode.svg "
+      width="24"
+      height="24"
+      alt="Light mode"
+      aria-label="light mode toggle"
+      title="Light mode"
+      style="filter: invert(1);"
+    />
+  </button>
+</div>
+<script>
+  const cls = document.body.classList;
+  const getSessionTheme = sessionStorage.getItem("theme");
+  if (getSessionTheme === "dark") {
+    cls.toggle("dark-mode", true);
+  } else if (getSessionTheme === "light") {
+    cls.toggle("dark-mode", false);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    cls.toggle("dark-mode", true);
+  }
+  document
+    .getElementById("dark-mode-on")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", true);
+      sessionStorage.setItem("theme", "dark");
+    });
+  document
+    .getElementById("dark-mode-off")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", false);
+      sessionStorage.setItem("theme", "light");
+    });
+</script>
+<noscript>
+  <style>
+    .dark-mode-buttons {
+      display: none;
+    }
+  </style>
+</noscript>
+
+    
+</body>
+</html>

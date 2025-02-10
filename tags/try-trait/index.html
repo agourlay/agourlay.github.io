@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+
+    <title>try_trait</title>
+    <meta name="description" content="Yet another programming blog">
+
+    <link rel="stylesheet" href=" https://agourlay.github.io/main.css">
+
+    
+        <link rel="alternate" type="application/atom+xml" title="RSS" href=" https://agourlay.github.io/atom.xml">
+    
+
+    
+    
+</head>
+<body>
+    <a class="skip-main" href="#main">Skip to content</a>
+    <div class="container">
+        <header> 
+            <h1 class="site-header">
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io">Arnaud Gourlay&#x27;s blog</a>
+            </h1>
+            <nav>
+                
+                
+                
+                <a  href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;">Tags</a>
+                
+                
+                <a  href="&#x2F;pages&#x2F;about">About</a>
+                
+                
+            </nav>
+        </header>
+        <main id="main" tabindex="-1">
+            
+<h1>Tag: #try_trait</h1>
+<div class="article-info">
+    <a href=" https://agourlay.github.io/tags">To all tags</a>
+</div>
+
+
+
+    <article class="post-list">
+        <header> 
+            <h1>
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;rust-performance-retrospective-part3&#x2F;">A performance retrospective using Rust (part 3)</a>
+            </h1>
+        </header>
+
+        
+        
+        
+    <div class="article-info">
+        
+        <div class="article-date"> 8 August 2022</div>
+        
+        <div class="article-taxonomies">
+            
+                <ul class="article-categories">
+                    
+                    <li><a href=" https://agourlay.github.io/categories/series/">series</a></li>
+                    
+                </ul>
+            
+            
+                <ul class="article-tags">
+                    
+                    <li><a href=" https://agourlay.github.io/tags/rust/">#Rust</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/performance/">#performance</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/hprof-slurp/">#hprof-slurp</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/try-trait/">#try_trait</a></li>
+                    
+                </ul>
+            
+        </div>
+    </div>
+
+    </article>
+
+
+
+
+        </main>
+        <footer>
+            <p>
+                © Arnaud Gourlay&#x27;s blog 2025<br>
+                Powered by <a target="_blank" href="https://getzola.org/">Zola</a>, Theme <a target="_blank" href="https://github.com/zbrox/anpu-zola-theme">Anpu</a>.
+            </p>
+            <p>
+                
+                
+            </p>
+        </footer>
+    </div>
+
+    <div class="dark-mode-buttons">
+  <button class="dark-mode-button" id="dark-mode-on">
+    <img
+      src=" https://agourlay.github.io/dark_mode.svg"
+      width="24"
+      height="24"
+      alt="Dark mode"
+      aria-label="dark mode toggle"
+      title="Dark mode"
+    />
+  </button>
+  <button class="dark-mode-button" id="dark-mode-off">
+    <img
+      src=" https://agourlay.github.io/light_mode.svg "
+      width="24"
+      height="24"
+      alt="Light mode"
+      aria-label="light mode toggle"
+      title="Light mode"
+      style="filter: invert(1);"
+    />
+  </button>
+</div>
+<script>
+  const cls = document.body.classList;
+  const getSessionTheme = sessionStorage.getItem("theme");
+  if (getSessionTheme === "dark") {
+    cls.toggle("dark-mode", true);
+  } else if (getSessionTheme === "light") {
+    cls.toggle("dark-mode", false);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    cls.toggle("dark-mode", true);
+  }
+  document
+    .getElementById("dark-mode-on")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", true);
+      sessionStorage.setItem("theme", "dark");
+    });
+  document
+    .getElementById("dark-mode-off")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", false);
+      sessionStorage.setItem("theme", "light");
+    });
+</script>
+<noscript>
+  <style>
+    .dark-mode-buttons {
+      display: none;
+    }
+  </style>
+</noscript>
+
+    
+</body>
+</html>

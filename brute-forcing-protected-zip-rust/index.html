@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+
+    <title>Brute forcing protected ZIP archives in Rust</title>
+    <meta name="description" content="Yet another programming blog">
+
+    <link rel="stylesheet" href=" https://agourlay.github.io/main.css">
+
+    
+        <link rel="alternate" type="application/atom+xml" title="RSS" href=" https://agourlay.github.io/atom.xml">
+    
+
+    
+    
+</head>
+<body>
+    <a class="skip-main" href="#main">Skip to content</a>
+    <div class="container">
+        <header> 
+            <h1 class="site-header">
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io">Arnaud Gourlay&#x27;s blog</a>
+            </h1>
+            <nav>
+                
+                
+                
+                <a  href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;">Tags</a>
+                
+                
+                <a  href="&#x2F;pages&#x2F;about">About</a>
+                
+                
+            </nav>
+        </header>
+        <main id="main" tabindex="-1">
+            
+
+<article class="post">
+    <header>
+        <h1>Brute forcing protected ZIP archives in Rust</h1>
+    </header>
+    <div class="content">
+        <p>This article explains how to brute force the password of protected ZIP archives using Rust. It is primarily targeted at beginner Rust developers, but it will surely be interesting to a wider audience.</p>
+<p>The full code with better error handling and proper command line arguments (CLI) is available at <a href="https://github.com/agourlay/zip-password-finder">zip-password-finder</a>.</p>
+<h2 id="context">Context</h2>
+<p>A while back, I found myself in possession of a ZIP archive containing family data that I could not access.
+The archive was protected by a password which no one knew.</p>
+<p>After a short investigation, I found several tools advertised as being capable of recovering passwords for various types of compressed archives.
+However, most of them looked rather fishy or required a license, which made me rather skeptical.</p>
+<p>It is at that point that I reached the conclusion that building such a tool myself would be a good learning opportunity.</p>
+<p>I might be able to recover the data and it could be the subject of a blog article!</p>
+<h2 id="architecture">Architecture</h2>
+<p>We can picture our future program as having two main parts.</p>
+<p>The first part is about generating candidate passwords. This could be done by either loading passwords from a dictionary or by simply generating all possible words ourselves.</p>
+<p>The second part is then responsible for testing those candidates against the archive, one by one until the password is found or no more candidates are available.</p>
+<p>Testing millions of passwords using a brute force strategy sounds like something that is CPU bound. Therefore we should structure our program so that the second part can scale nicely with the number of cores on the host machine.</p>
+<p>A common approach for this type of problem is to use a set of workers to process tasks from a shared queue.</p>
+<p><img src="/2022-10-03/architecture.png" alt="Architecture" /></p>
+<p>In practice, we will orchestrate the password generator and workers as threads communicating via a channel.</p>
+<p>Channels are a type of unidirectional asynchronous communication between threads that allows information to flow between the <code>Sender</code> and the <code>Receiver</code>.</p>
+<p>There are several flavors of channels. In our case, we need to support a single producer and multiple consumers, a.k.a. SPMC (but MPMC will do as well).</p>
+<h2 id="dictionary">Dictionary</h2>
+<p>In order to keep the scope small for the beginning, we will start by retrieving passwords from an existing dictionary file.</p>
+<p>The following file <a href="https://github.com/danielmiessler/SecLists/blob/master/Passwords/xato-net-10-million-passwords.txt">Passwords/xato-net-10-million-passwords.txt</a> found on Github looks like a perfect candidate.</p>
+<p>Let's fetch it and have a peek at its content:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">wget</span><span> https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/xato-net-10-million-passwords.txt
+</span></code></pre>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">ls -lah</span><span> xato-net-10-million-passwords.txt | </span><span style="color:#bf616a;">awk -F </span><span>&quot; &quot; {&#39;</span><span style="color:#a3be8c;">print $5</span><span>&#39;} 
+</span><span style="color:#bf616a;">47M
+</span></code></pre>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">wc -l</span><span> xato-net-10-million-passwords.txt 
+</span><span style="color:#bf616a;">5189454</span><span> xato-net-10-million-passwords.txt
+</span></code></pre>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">head -10</span><span> xato-net-10-million-passwords.txt 
+</span><span style="color:#bf616a;">123456
+</span><span style="color:#bf616a;">password
+</span><span style="color:#bf616a;">12345678
+</span><span style="color:#bf616a;">qwerty
+</span><span style="color:#bf616a;">123456789
+</span><span style="color:#bf616a;">12345
+</span><span style="color:#bf616a;">1234
+</span><span style="color:#bf616a;">111111
+</span><span style="color:#bf616a;">1234567
+</span><span style="color:#bf616a;">dragon
+</span></code></pre>
+<p>It actually contains only 5.189.454 passwords but that should be more than enough for our testing use case. We can start getting our hands dirty.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">cargo</span><span> new zip-password-finder
+</span></code></pre>
+<p>Our program will have a thread reading the content of the password dictionary and pushing each line into a shared channel with the workers.</p>
+<p>There will be millions of password candidates. We need something very fast.</p>
+<p>We will use the <a href="https://github.com/crossbeam-rs/crossbeam">crossbeam-channel</a> crate for our channels because they are far superior to the channels avalaible in <code>std:: sync:: mpsc</code> in every way.</p>
+<p>Those better channels might even make it to the standard library in the <a href="https://github.com/rust-lang/rust/pull/93563">future</a>.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#96b5b4;">cd</span><span> zip-password-finder/
+</span><span style="color:#bf616a;">cargo</span><span> add crossbeam-channel
+</span></code></pre>
+<p>Here is our reader:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">use </span><span>crossbeam_channel::Sender;
+</span><span style="color:#b48ead;">use </span><span>std::fs::File;
+</span><span style="color:#b48ead;">use </span><span>std::io::{BufRead, BufReader};
+</span><span style="color:#b48ead;">use </span><span>std::path::PathBuf;
+</span><span style="color:#b48ead;">use </span><span>std::thread;
+</span><span style="color:#b48ead;">use </span><span>std::thread::JoinHandle;
+</span><span>
+</span><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">start_password_reader</span><span>(</span><span style="color:#bf616a;">file_path</span><span>: PathBuf, </span><span style="color:#bf616a;">send_password</span><span>: Sender&lt;String&gt;) -&gt; JoinHandle&lt;()&gt; {
+</span><span>    thread::Builder::new()
+</span><span>        .</span><span style="color:#96b5b4;">name</span><span>(&quot;</span><span style="color:#a3be8c;">password-reader</span><span>&quot;.</span><span style="color:#96b5b4;">to_string</span><span>())
+</span><span>        .</span><span style="color:#96b5b4;">spawn</span><span>(</span><span style="color:#b48ead;">move </span><span>|| {
+</span><span>            </span><span style="color:#b48ead;">let</span><span> file = File::open(file_path).</span><span style="color:#96b5b4;">unwrap</span><span>();
+</span><span>            </span><span style="color:#b48ead;">let</span><span> reader = BufReader::new(file);
+</span><span>            </span><span style="color:#b48ead;">for</span><span> line in reader.</span><span style="color:#96b5b4;">lines</span><span>() {
+</span><span>                </span><span style="color:#b48ead;">match</span><span> send_password.</span><span style="color:#96b5b4;">send</span><span>(line.</span><span style="color:#96b5b4;">unwrap</span><span>()) {
+</span><span>                    Ok(_) =&gt; {}
+</span><span>                    Err(_) =&gt; </span><span style="color:#b48ead;">break</span><span>, </span><span style="color:#65737e;">// channel disconnected, stop thread
+</span><span>                }
+</span><span>            }
+</span><span>        })
+</span><span>        .</span><span style="color:#96b5b4;">unwrap</span><span>()
+</span><span>}
+</span></code></pre>
+<p>There are a few interesting things to note here:</p>
+<ul>
+<li>It is a good practice to give names to threads for better error reporting and performance observability.</li>
+<li>The function returns a <code>JoinHandle</code> for the caller, our main thread, to wait on.</li>
+<li>The entire file is read and pushed into the channel. This might be a problem for larger files.</li>
+</ul>
+<h2 id="password-checker-worker">Password checker worker</h2>
+<p>We will be using the <a href="https://github.com/zip-rs/zip">zip-rs</a> for testing the password candidates pulled from the channel.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">cargo</span><span> add zip
+</span></code></pre>
+<p>It supports both <a href="https://github.com/zip-rs/zip/pull/115">ZipCrypto</a> and <a href="https://github.com/zip-rs/zip/pull/203">AES</a> encrypted zip archives.</p>
+<p>This is the first version of the worker thread:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">use </span><span>crossbeam_channel::Sender;
+</span><span style="color:#b48ead;">use </span><span>std::fs::File;
+</span><span style="color:#b48ead;">use </span><span>std::io::{BufRead, BufReader};
+</span><span style="color:#b48ead;">use </span><span>std::path::PathBuf;
+</span><span style="color:#b48ead;">use </span><span>std::thread;
+</span><span style="color:#b48ead;">use </span><span>std::thread::JoinHandle;
+</span><span>
+</span><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">password_checker</span><span>(
+</span><span>    </span><span style="color:#bf616a;">index</span><span>: </span><span style="color:#b48ead;">usize</span><span>,
+</span><span>    </span><span style="color:#bf616a;">file_path</span><span>: &amp;Path,
+</span><span>    </span><span style="color:#bf616a;">receive_password</span><span>: Receiver&lt;String&gt;,
+</span><span>) -&gt; JoinHandle&lt;()&gt; {
+</span><span>    </span><span style="color:#b48ead;">let</span><span> file = fs::File::open(file_path).</span><span style="color:#96b5b4;">expect</span><span>(&quot;</span><span style="color:#a3be8c;">File should exist</span><span>&quot;);
+</span><span>    thread::Builder::new()
+</span><span>        .</span><span style="color:#96b5b4;">name</span><span>(format!(&quot;</span><span style="color:#a3be8c;">worker-</span><span style="color:#d08770;">{}</span><span>&quot;, index))
+</span><span>        .</span><span style="color:#96b5b4;">spawn</span><span>(</span><span style="color:#b48ead;">move </span><span>|| {
+</span><span>            </span><span style="color:#b48ead;">let mut</span><span> archive = zip::ZipArchive::new(file).</span><span style="color:#96b5b4;">expect</span><span>(&quot;</span><span style="color:#a3be8c;">Archive validated before-hand</span><span>&quot;);
+</span><span>            </span><span style="color:#b48ead;">loop </span><span>{
+</span><span>                </span><span style="color:#b48ead;">match</span><span> receive_password.</span><span style="color:#96b5b4;">recv</span><span>() {
+</span><span>                    Err(_) =&gt; </span><span style="color:#b48ead;">break</span><span>, </span><span style="color:#65737e;">// channel disconnected, stop thread
+</span><span>                    Ok(password) =&gt; {
+</span><span>                        </span><span style="color:#b48ead;">let</span><span> res = archive.</span><span style="color:#96b5b4;">by_index_decrypt</span><span>(</span><span style="color:#d08770;">0</span><span>, password.</span><span style="color:#96b5b4;">as_bytes</span><span>()); </span><span style="color:#65737e;">// decrypt first file in archive
+</span><span>                        </span><span style="color:#b48ead;">match</span><span> res {
+</span><span>                            Err(e) =&gt; panic!(&quot;</span><span style="color:#a3be8c;">Unexpected error {:?}</span><span>&quot;, e),
+</span><span>                            Ok(Err(_)) =&gt; (), </span><span style="color:#65737e;">// invalid password - continue
+</span><span>                            Ok(Ok(_)) =&gt; {
+</span><span>                                println!(&quot;</span><span style="color:#a3be8c;">Password found:</span><span style="color:#d08770;">{}</span><span>&quot;, password);
+</span><span>                                </span><span style="color:#b48ead;">break</span><span>; </span><span style="color:#65737e;">// stop thread
+</span><span>                            }
+</span><span>                        }
+</span><span>                    }
+</span><span>                }
+</span><span>            }
+</span><span>        })
+</span><span>        .</span><span style="color:#96b5b4;">unwrap</span><span>()
+</span><span>}
+</span></code></pre>
+<p>This straightforward approach is unfortunately not enough as it yields false positive passwords from time to time.</p>
+<p>The Rustdoc for <code>by_index_decrypt</code> actually warns about it.</p>
+<blockquote>
+<p>This function sometimes accepts wrong passwords.
+This is because the ZIP spec only allows us to check for a 1/256 chance that the password is correct.
+There are many passwords out there that will also pass the validity checks we are able to perform.
+This is a weakness of the ZipCrypto algorithm, due to its fairly primitive approach to cryptography.</p>
+</blockquote>
+<p>We can workaround those collisions by performing a full read of the archive with the password to make sure it is actually correct.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span> use crossbeam_channel::{Receiver, Sender};
+</span><span> use std::fs::File;
+</span><span style="color:#bf616a;">-use std::io::{BufRead, BufReader};
+</span><span style="color:#a3be8c;">+use std::io::{BufRead, BufReader, Read};
+</span><span> use std::path::{Path, PathBuf};
+</span><span> use std::thread::JoinHandle;
+</span><span> use std::{fs, thread};
+</span><span>@@ -38,10 +38,14 @@ </span><span style="color:#8fa1b3;">pub fn password_checker(
+</span><span>        let res = archive.by_index_decrypt(0, password.as_bytes()); // decrypt first file in archive
+</span><span>        match res {
+</span><span>            Err(e) =&gt; panic!(&quot;Unexpected error {:?}&quot;, e),
+</span><span>            Ok(Err(_)) =&gt; (), // invalid password - continue
+</span><span style="color:#bf616a;">-           Ok(Ok(_)) =&gt; {
+</span><span style="color:#bf616a;">-               println!(&quot;Password found:{}&quot;, password);
+</span><span style="color:#bf616a;">-               break; // stop thread
+</span><span style="color:#a3be8c;">+           Ok(Err(_)) =&gt; (), // invalid password
+</span><span style="color:#a3be8c;">+           Ok(Ok(mut zip)) =&gt; {
+</span><span style="color:#a3be8c;">+               // Validate password by reading the zip file to make sure it is not merely a hash collision.
+</span><span style="color:#a3be8c;">+               let mut buffer = Vec::with_capacity(zip.size() as usize);
+</span><span style="color:#a3be8c;">+               match zip.read_to_end(&amp;mut buffer) {
+</span><span style="color:#a3be8c;">+                   Err(_) =&gt; (), // password collision - continue
+</span><span style="color:#a3be8c;">+                   Ok(_) =&gt; {
+</span><span style="color:#a3be8c;">+                       println!(&quot;Password found:{}&quot;, password);
+</span><span style="color:#a3be8c;">+                       break; // stop thread
+</span><span style="color:#a3be8c;">+                   }
+</span><span style="color:#a3be8c;">+               }
+</span><span>            }
+</span><span>        }
+</span><span>    }
+</span></code></pre>
+<p>Again, a few interesting things to note here:</p>
+<ul>
+<li>Each worker thread gets a unique name.</li>
+<li>The worker is <code>looping</code> until the password is found or the channel is closed.</li>
+<li>Each worker opens the Zip file in memory to avoid extra coordination.</li>
+<li>The password found is printed to the console.</li>
+</ul>
+<h2 id="putting-it-together">Putting it together</h2>
+<p>We can now wire things up together nicely and get one step closer to our goal.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">pub fn </span><span style="color:#8fa1b3;">password_finder</span><span>(</span><span style="color:#bf616a;">zip_path</span><span>: &amp;</span><span style="color:#b48ead;">str</span><span>, </span><span style="color:#bf616a;">password_list_path</span><span>: &amp;</span><span style="color:#b48ead;">str</span><span>, </span><span style="color:#bf616a;">workers</span><span>: </span><span style="color:#b48ead;">usize</span><span>) {
+</span><span>    </span><span style="color:#b48ead;">let</span><span> zip_file_path = Path::new(zip_path);
+</span><span>    </span><span style="color:#b48ead;">let</span><span> password_list_file_path = Path::new(password_list_path).</span><span style="color:#96b5b4;">to_path_buf</span><span>();
+</span><span>
+</span><span>    </span><span style="color:#65737e;">// channel with backpressure
+</span><span>    </span><span style="color:#b48ead;">let </span><span>(send_password, receive_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =
+</span><span>        crossbeam_channel::bounded(workers * </span><span style="color:#d08770;">10_000</span><span>);
+</span><span>
+</span><span>    </span><span style="color:#65737e;">// thread handle for password reader
+</span><span>    </span><span style="color:#b48ead;">let</span><span> password_gen_handle = </span><span style="color:#96b5b4;">start_password_reader</span><span>(password_list_file_path, send_password);
+</span><span>
+</span><span>    </span><span style="color:#65737e;">// save all workers handles
+</span><span>    </span><span style="color:#b48ead;">let mut</span><span> worker_handles = Vec::with_capacity(workers);
+</span><span>    </span><span style="color:#b48ead;">for</span><span> i in </span><span style="color:#d08770;">1</span><span>..=workers {
+</span><span>        </span><span style="color:#b48ead;">let</span><span> join_handle = </span><span style="color:#96b5b4;">password_checker</span><span>(i, zip_file_path, receive_password.</span><span style="color:#96b5b4;">clone</span><span>());
+</span><span>        worker_handles.</span><span style="color:#96b5b4;">push</span><span>(join_handle);
+</span><span>    }
+</span><span>
+</span><span>    </span><span style="color:#65737e;">// wait for workers to finish
+</span><span>    </span><span style="color:#b48ead;">for</span><span> h in worker_handles {
+</span><span>        h.</span><span style="color:#96b5b4;">join</span><span>().</span><span style="color:#96b5b4;">unwrap</span><span>();
+</span><span>    }
+</span><span>
+</span><span>    </span><span style="color:#65737e;">// wait for the end of the file
+</span><span>    password_gen_handle.</span><span style="color:#96b5b4;">join</span><span>().</span><span style="color:#96b5b4;">unwrap</span><span>();
+</span><span>}
+</span></code></pre>
+<p>The first important point here is the use of a bounded channel between the password generator and the workers.</p>
+<p>A bounded channel will block the sender once its capacity is reached. This is handy to implement back-pressure.</p>
+<p>In our case, the producer is much faster than the consumers, so we are at risk of loading the entire dictionary inside the channel, which is not great for memory usage.</p>
+<p>To avoid slowing down the consumers, the capacity is sized according to the number of workers.</p>
+<p>Secondly, we are saving all <code>JoinHandle</code> to await the termination of all threads.</p>
+<p>And finally, the main function!</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">fn </span><span style="color:#8fa1b3;">main</span><span>() {
+</span><span>    </span><span style="color:#b48ead;">let</span><span> zip_path = env::args().</span><span style="color:#96b5b4;">nth</span><span>(</span><span style="color:#d08770;">1</span><span>).</span><span style="color:#96b5b4;">unwrap</span><span>();
+</span><span>    </span><span style="color:#b48ead;">let</span><span> dictionary_path = &quot;</span><span style="color:#a3be8c;">/opt/xato-net-10-million-passwords.txt</span><span>&quot;;
+</span><span>    </span><span style="color:#b48ead;">let</span><span> workers = </span><span style="color:#d08770;">3</span><span>;
+</span><span>    </span><span style="color:#96b5b4;">password_finder</span><span>(&amp;zip_path, dictionary_path, workers);
+</span><span>}
+</span></code></pre>
+<p>As a command line argument our program accepts the path to an encrypted Zip file, which will be brute forced using a dictionary with 3 workers.</p>
+<p>The dictionary path is hard-coded for the time being.</p>
+<p>For testing purposes, we need an archive encrypted using a password from the dictionary.</p>
+<p>I am picking the entry number 1.000.000, <code>vaanes</code>, to create our encrypted test zip.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">sed -ne</span><span> 1000000p xato-net-10-million-passwords.txt
+</span><span style="color:#bf616a;">vaanes
+</span></code></pre>
+<p>Here are the details of the test archive created using this password.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">zipinfo</span><span> encrypted-test-dict.zip
+</span><span>
+</span><span style="color:#bf616a;">Archive:</span><span>  encrypted-test-dict.zip
+</span><span style="color:#bf616a;">Zip</span><span> file size: 202 bytes, number of entries: 1
+</span><span style="color:#bf616a;">-rw-rw-r--</span><span>  6.3 unx        9 Bx u099 22-Sep-24 12:19 test-xato
+</span><span style="color:#bf616a;">1</span><span> file, 9 bytes uncompressed, 16 bytes compressed:</span><span style="color:#bf616a;">  -77</span><span>.8%
+</span></code></pre>
+<p>It is pretty small and uses compression as storage method.</p>
+<p>Let's run our program!</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#96b5b4;">cd</span><span> /target/release
+</span><span style="color:#bf616a;">time</span><span> ./zip-password-finder encrypted-test-dict.zip
+</span></code></pre>
+<p>Checking on the CPU usage with <code>htop</code> yields an expected result.</p>
+<p><img src="/2022-10-03/htop-3-workers.png" alt="CPU usage with 3 workers" /></p>
+<p>Three worker threads are going at full speed, and one thread is reading the passwords at a leisurely pace.</p>
+<p>After 4 minutes, the program prints on the terminal.</p>
+<pre data-lang="txt" style="background-color:#2b303b;color:#c0c5ce;" class="language-txt "><code class="language-txt" data-lang="txt"><span>Password found:vaanes
+</span></code></pre>
+<p>But the program does not terminate right away; it takes more than 20 minutes to finish!</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">real</span><span>    23m36,203s
+</span><span style="color:#bf616a;">user</span><span>    72m29,567s
+</span><span style="color:#bf616a;">sys</span><span>     0m41,570s
+</span></code></pre>
+<p>First the good news: the program found the password!</p>
+<p>It processed 1 million passwords in around five minutes using 3 workers which gives us:</p>
+<pre data-lang="txt" style="background-color:#2b303b;color:#c0c5ce;" class="language-txt "><code class="language-txt" data-lang="txt"><span>1.000.000 passwords tested / (4 * 60 seconds) / 3 workers =
+</span><span>1389 passwords tested per second per worker assuming linear scaling
+</span></code></pre>
+<p>This result provides us with an idea of what can be achieved with this approach.</p>
+<p>Secondly, the bad news: our program does not terminate properly, which is a big issue.</p>
+<h2 id="graceful-shutdown">Graceful shutdown</h2>
+<p>Looking at the code more closely, we can see that we terminate our threads only under specific conditions.</p>
+<p>For the password dictionary thread:</p>
+<ul>
+<li>If the channel has no consumers attached.</li>
+<li>If we reach the end of the dictionary.</li>
+</ul>
+<p>And for the worker threads:</p>
+<ul>
+<li>If the channel is empty and has no producer attached.</li>
+<li>If we find the password.</li>
+</ul>
+<p>This explains why our program kept on running previously; we only stopped the thread that found the password!</p>
+<p>The program went through the rest of the dictionary using only two workers.</p>
+<p>There are different ways to solve this problem. We will try to come up with an <strong>explicit</strong> shutdown sequence that does not rely on timeout nor on the channel being disconnected.</p>
+<p>We need a way for the worker thread that finds the password to be able to inform other threads that they can shut down.</p>
+<p>First, let's have worker threads communicate the password to the main thread instead of simply printing it out in the terminal.</p>
+<p>This design is much better and will enable unit testing later on!</p>
+<p>As a follow up, once the main thread receives the password, it will notify all threads to stop using a thread-safe signal.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span> use std::path::{Path, PathBuf};
+</span><span style="color:#a3be8c;">+use std::sync::atomic::{AtomicBool, Ordering};
+</span><span style="color:#a3be8c;">+use std::sync::Arc;
+</span><span> use std::thread::JoinHandle;
+</span><span> use std::{env, fs, thread};
+</span><span> 
+</span><span style="color:#bf616a;">-pub fn start_password_reader(file_path: PathBuf, send_password: Sender&lt;String&gt;) -&gt; JoinHandle&lt;()&gt; {
+</span><span style="color:#a3be8c;">+pub fn start_password_reader(
+</span><span style="color:#a3be8c;">+    file_path: PathBuf,
+</span><span style="color:#a3be8c;">+    send_password: Sender&lt;String&gt;,
+</span><span style="color:#a3be8c;">+    stop_signal: Arc&lt;AtomicBool&gt;,
+</span><span style="color:#a3be8c;">+) -&gt; JoinHandle&lt;()&gt; {
+</span><span>     thread::Builder::new()
+</span><span>         .name(&quot;password-reader&quot;.to_string())
+</span><span>         .spawn(move || {
+</span><span>             let file = File::open(file_path).unwrap();
+</span><span>             let reader = BufReader::new(file);
+</span><span>             for line in reader.lines() {
+</span><span style="color:#bf616a;">-                match send_password.send(line.unwrap()) {
+</span><span style="color:#bf616a;">-                    Ok(_) =&gt; {}
+</span><span style="color:#bf616a;">-                    Err(_) =&gt; break, // channel disconnected, stop thread
+</span><span style="color:#a3be8c;">+                if stop_signal.load(Ordering::Relaxed) {
+</span><span style="color:#a3be8c;">+                    break;
+</span><span style="color:#a3be8c;">+                } else {
+</span><span style="color:#a3be8c;">+                    match send_password.send(line.unwrap()) {
+</span><span style="color:#a3be8c;">+                        Ok(_) =&gt; {}
+</span><span style="color:#a3be8c;">+                        Err(_) =&gt; break, // channel disconnected, stop thread
+</span><span style="color:#a3be8c;">+                    }
+</span><span>                 }
+</span><span>             }
+</span><span>         })
+</span><span>@@ -25,13 +35,15 @@ </span><span style="color:#8fa1b3;">pub fn password_checker(
+</span><span>     index: usize,
+</span><span>     file_path: &amp;Path,
+</span><span>     receive_password: Receiver&lt;String&gt;,
+</span><span style="color:#a3be8c;">+    stop_signal: Arc&lt;AtomicBool&gt;,
+</span><span style="color:#a3be8c;">+    send_password_found: Sender&lt;String&gt;,
+</span><span> ) -&gt; JoinHandle&lt;()&gt; {
+</span><span>     let file = fs::File::open(file_path).expect(&quot;File should exist&quot;);
+</span><span>     thread::Builder::new()
+</span><span>         .name(format!(&quot;worker-{}&quot;, index))
+</span><span>         .spawn(move || {
+</span><span>             let mut archive = zip::ZipArchive::new(file).expect(&quot;Archive validated before-hand&quot;);
+</span><span style="color:#bf616a;">-            loop {
+</span><span style="color:#a3be8c;">+            while !stop_signal.load(Ordering::Relaxed) {
+</span><span>                 match receive_password.recv() {
+</span><span>                     Err(_) =&gt; break, // channel disconnected, stop thread
+</span><span>                     Ok(password) =&gt; {
+</span><span>@@ -44,7 +56,12 @@ </span><span style="color:#8fa1b3;">pub fn password_checker(
+</span><span>                                 let mut buffer = Vec::with_capacity(zip.size() as usize);
+</span><span>                                 match zip.read_to_end(&amp;mut buffer) {
+</span><span>                                     Err(_) =&gt; (), // password collision - continue
+</span><span style="color:#bf616a;">-                                    Ok(_) =&gt; {
+</span><span style="color:#bf616a;">-                                        println!(&quot;Password found:{}&quot;, password);
+</span><span style="color:#bf616a;">-                                        break; // stop thread
+</span><span style="color:#a3be8c;">+                                    Ok(_) =&gt; {
+</span><span style="color:#a3be8c;">+                                        // Send password and continue processing while waiting for signal
+</span><span style="color:#a3be8c;">+                                        send_password_found
+</span><span style="color:#a3be8c;">+                                            .send(password)
+</span><span style="color:#a3be8c;">+                                            .expect(&quot;Send found password should not fail&quot;);
+</span><span style="color:#a3be8c;">+                                    }
+</span><span>                                 }
+</span><span>                             }
+</span><span>                         }
+</span><span>@@ -55,7 +72,7 @@ </span><span style="color:#8fa1b3;">pub fn password_checker(
+</span><span>         .unwrap()
+</span><span> }
+</span></code></pre>
+<p>The threads can exit their looping state by probing a stop signal materialized by an <code>Arc&lt;AtomicBool&gt;</code> which is safe and cheap to operate.</p>
+<p>Even the worker thread which finds the password will simply wait for the signal, this way we avoid having to handle the special case where there is only a single worker.</p>
+<p>And for the wiring and actual graceful shutdown.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span style="color:#bf616a;">-pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize) {
+</span><span style="color:#a3be8c;">+pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize) -&gt; Option&lt;String&gt; {
+</span><span>     let zip_file_path = Path::new(zip_path);
+</span><span>     let password_list_file_path = Path::new(password_list_path).to_path_buf();
+</span><span> 
+</span><span>@@ -63,28 +80,59 @@ </span><span style="color:#8fa1b3;">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)
+</span><span>     let (send_password, receive_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =
+</span><span>         crossbeam_channel::bounded(workers * 10_000);
+</span><span> 
+</span><span style="color:#a3be8c;">+    let (send_found_password, receive_found_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =
+</span><span style="color:#a3be8c;">+        crossbeam_channel::bounded(1);
+</span><span style="color:#a3be8c;">+
+</span><span style="color:#a3be8c;">+    // stop signals to shutdown threads
+</span><span style="color:#a3be8c;">+    let stop_workers_signal = Arc::new(AtomicBool::new(false));
+</span><span style="color:#a3be8c;">+    let stop_gen_signal = Arc::new(AtomicBool::new(false));
+</span><span style="color:#a3be8c;">+
+</span><span>     // thread handle for password reader
+</span><span style="color:#bf616a;">-    let password_gen_handle = start_password_reader(password_list_file_path, send_password);
+</span><span style="color:#a3be8c;">+    let password_gen_handle = start_password_reader(
+</span><span style="color:#a3be8c;">+        password_list_file_path,
+</span><span style="color:#a3be8c;">+        send_password,
+</span><span style="color:#a3be8c;">+        stop_gen_signal.clone(),
+</span><span style="color:#a3be8c;">+    );
+</span><span> 
+</span><span>     // save all workers handles
+</span><span>     let mut worker_handles = Vec::with_capacity(workers);
+</span><span>     for i in 1..=workers {
+</span><span style="color:#bf616a;">-        let join_handle = password_checker(i, zip_file_path, receive_password.clone());
+</span><span style="color:#a3be8c;">+        let join_handle = password_checker(
+</span><span style="color:#a3be8c;">+            i,
+</span><span style="color:#a3be8c;">+            zip_file_path,
+</span><span style="color:#a3be8c;">+            receive_password.clone(),
+</span><span style="color:#a3be8c;">+            stop_workers_signal.clone(),
+</span><span style="color:#a3be8c;">+            send_found_password.clone(),
+</span><span style="color:#a3be8c;">+        );
+</span><span>         worker_handles.push(join_handle);
+</span><span>     }
+</span><span> 
+</span><span style="color:#bf616a;">-    // wait for workers to finish
+</span><span style="color:#bf616a;">-    for h in worker_handles {
+</span><span style="color:#bf616a;">-        h.join().unwrap();
+</span><span style="color:#bf616a;">-    }
+</span><span style="color:#a3be8c;">+    // drop reference in `main` so that it disappears completely with workers for a clean shutdown
+</span><span style="color:#a3be8c;">+    drop(send_found_password);
+</span><span> 
+</span><span style="color:#bf616a;">-    // wait for the end of the file
+</span><span style="color:#bf616a;">-    password_gen_handle.join().unwrap();
+</span><span style="color:#a3be8c;">+    match receive_found_password.recv() {
+</span><span style="color:#a3be8c;">+        Ok(password_found) =&gt; {
+</span><span style="color:#a3be8c;">+            // stop generating values first to avoid deadlock on channel
+</span><span style="color:#a3be8c;">+            stop_gen_signal.store(true, Ordering::Relaxed);
+</span><span style="color:#a3be8c;">+            password_gen_handle.join().unwrap();
+</span><span style="color:#a3be8c;">+            // stop workers
+</span><span style="color:#a3be8c;">+            stop_workers_signal.store(true, Ordering::Relaxed);
+</span><span style="color:#a3be8c;">+            for h in worker_handles {
+</span><span style="color:#a3be8c;">+                h.join().unwrap();
+</span><span style="color:#a3be8c;">+            }
+</span><span style="color:#a3be8c;">+            Some(password_found)
+</span><span style="color:#a3be8c;">+        }
+</span><span style="color:#a3be8c;">+        Err(_) =&gt; None,
+</span><span style="color:#a3be8c;">+    }
+</span><span> }
+</span><span> 
+</span><span> fn main() {
+</span><span>     let zip_path = env::args().nth(1).unwrap();
+</span><span>     let dictionary_path = &quot;/home/agourlay/Workspace/blog-data/find-password-zip/xato-net-10-million-passwords.txt&quot;;
+</span><span>     let workers = 3;
+</span><span style="color:#bf616a;">-    password_finder(&amp;zip_path, dictionary_path, workers);
+</span><span style="color:#a3be8c;">+
+</span><span style="color:#a3be8c;">+    match password_finder(&amp;zip_path, dictionary_path, workers) {
+</span><span style="color:#a3be8c;">+        Some(password_found) =&gt; println!(&quot;Password found:{}&quot;, password_found),
+</span><span style="color:#a3be8c;">+        None =&gt; println!(&quot;No password found :(&quot;),
+</span><span style="color:#a3be8c;">+    }
+</span><span> }
+</span><span>
+</span></code></pre>
+<p>The shutdown procedure must be carefully handled to avoid a deadlock of our threads.</p>
+<p>Using channels can make our threads block forever if the channel is not disconnected:</p>
+<ul>
+<li>A consuming thread blocks on an empty channel.</li>
+<li>A producing thread blocks on a full bounded channel.</li>
+</ul>
+<p>This makes the task more difficult given that signals are efficient only if the threads are able to run their inner loop.</p>
+<p>Given that we are using a bounded channel, it makes sense to shutdown the producer first.</p>
+<p>In addition, it is important to manually drop <code>send_found_password</code> to shutdown properly when no password is found:</p>
+<ol>
+<li>The password generator thread exits at the end of the dictionary.</li>
+<li>All workers exit when the channel is disconnected.</li>
+<li>All workers drop their clone of <code>Arc&lt;send_found_password&gt;</code>.</li>
+<li>Deadlock occurs: <code>receive_found_password.recv()</code> won't be triggered unless all producers are gone <strong>but</strong> the main thread still holds the initial <code>Arc&lt;send_found_password&gt;</code>.</li>
+</ol>
+<p>This gives us as valid shutdown sequence:</p>
+<ol>
+<li>Drop the initial <code>Arc&lt;send_found_password&gt;</code>.</li>
+<li>Wait for the found password from a worker.</li>
+<li>Toggle shutdown signal password generator.</li>
+<li>Join the password generator handle.</li>
+<li>Toggle shutdown signal for workers.</li>
+<li>Join all the worker handles.</li>
+</ol>
+<p>Finding a correct sequence can be a bit subtle, so it is better to test it.</p>
+<p>An alternative solution would be to use the timeout-flavored API <code>recv_timeout</code> and <code>send_timeout</code> which enable you to block only for a specific duration.</p>
+<p>I have decided to not use those as they are not strictly required and it forces us to better understand our shutdown sequence :)</p>
+<p>Let's give it a try!</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#96b5b4;">cd</span><span> /target/release
+</span><span style="color:#bf616a;">time</span><span> ./zip-password-finder encrypted-test-dict.zip
+</span><span style="color:#bf616a;">Password</span><span> found:vaanes
+</span><span>
+</span><span style="color:#bf616a;">real</span><span>  4m23,968s
+</span><span style="color:#bf616a;">user</span><span>  13m30,767s
+</span><span style="color:#bf616a;">sys</span><span>   0m7,130s
+</span></code></pre>
+<p>This is much better; the application shuts down as soon as the password is found!</p>
+<p>But something important is still missing. As a user, we have no feedback while the program is waiting.</p>
+<p>It would be great to see how much progress the program is making and have an idea of the estimated run time.</p>
+<h2 id="progress-bar">Progress bar</h2>
+<p>The easiest way to visualize the progress of our program is to set up a progress bar.</p>
+<p>One of the best crates for this is <a href="https://github.com/console-rs/indicatif">Indicatif</a>.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">cargo</span><span> add indicatif
+</span></code></pre>
+<p>The progress bar needs to be configured according to our use case.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span>
+</span><span>     let zip_file_path = Path::new(zip_path);
+</span><span>     let password_list_file_path = Path::new(password_list_path).to_path_buf();
+</span><span> 
+</span><span style="color:#a3be8c;">+    // Setup progress bar
+</span><span style="color:#a3be8c;">+    let progress_bar = ProgressBar::new(0);
+</span><span style="color:#a3be8c;">+    let progress_style = ProgressStyle::default_bar()
+</span><span style="color:#a3be8c;">+        .template(&quot;[{elapsed_precise}] {wide_bar} {pos}/{len} throughput:{per_sec} (eta:{eta})&quot;)
+</span><span style="color:#a3be8c;">+        .expect(&quot;Failed to create progress style&quot;);
+</span><span style="color:#a3be8c;">+    progress_bar.set_style(progress_style);
+</span><span style="color:#a3be8c;">+
+</span><span style="color:#a3be8c;">+    // Refresh terminal 2 times per seconds to avoid flickering effect
+</span><span style="color:#a3be8c;">+    let draw_target = ProgressDrawTarget::stdout_with_hz(2);
+</span><span style="color:#a3be8c;">+    progress_bar.set_draw_target(draw_target);
+</span><span style="color:#a3be8c;">+
+</span><span style="color:#a3be8c;">+    // Size progress bar according to dictionary size
+</span><span style="color:#a3be8c;">+    let file =
+</span><span style="color:#a3be8c;">+        BufReader::new(File::open(password_list_file_path.clone()).expect(&quot;Unable to open file&quot;));
+</span><span style="color:#a3be8c;">+    let total_password_count = file.lines().count();
+</span><span style="color:#a3be8c;">+    progress_bar.set_length(total_password_count as u64);
+</span><span style="color:#a3be8c;">+
+</span><span>     // MPMC channel with backpressure
+</span><span>     let (send_password, receive_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =
+</span><span>         crossbeam_channel::bounded(workers * 10_000);
+</span><span>@@ -103,6 +122,7 @@ </span><span style="color:#8fa1b3;">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)
+</span><span>             receive_password.clone(),
+</span><span>             stop_workers_signal.clone(),
+</span><span>             send_found_password.clone(),
+</span><span style="color:#a3be8c;">+            progress_bar.clone(),
+</span><span>         );
+</span><span>         worker_handles.push(join_handle);
+</span><span>     }
+</span><span>@@ -120,6 +140,7 @@ </span><span style="color:#8fa1b3;">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)
+</span><span>             for h in worker_handles {
+</span><span>                 h.join().unwrap();
+</span><span>             }
+</span><span style="color:#a3be8c;">+            progress_bar.finish_and_clear();
+</span><span>             Some(password_found)
+</span><span>         }
+</span><span>         Err(_) =&gt; None,
+</span></code></pre>
+<p>The most important points are:</p>
+<ul>
+<li>We set up a template to display some useful information regarding processing speed and ETA.</li>
+<li>The progress bar refresh rate is fixed to avoid flickering due to the high frequence of updates.</li>
+<li>The progress bar length is sized according to the length of the dictionary.</li>
+</ul>
+<p>The integration is rather straightforward on the workers' side; simply increment the progress bar after each candidate.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span>@@ -37,6 +38,7 @@ </span><span style="color:#8fa1b3;">pub fn password_checker(
+</span><span>     receive_password: Receiver&lt;String&gt;,
+</span><span>     stop_signal: Arc&lt;AtomicBool&gt;,
+</span><span>     send_password_found: Sender&lt;String&gt;,
+</span><span style="color:#a3be8c;">+    progress_bar: ProgressBar,
+</span><span> ) -&gt; JoinHandle&lt;()&gt; {
+</span><span>     let file = fs::File::open(file_path).expect(&quot;File should exist&quot;);
+</span><span>     thread::Builder::new()
+</span><span>@@ -65,6 +67,7 @@ </span><span style="color:#8fa1b3;">pub fn password_checker(
+</span><span>                                 }
+</span><span>                             }
+</span><span>                         }
+</span><span style="color:#a3be8c;">+                        progress_bar.inc(1);
+</span><span>                     }
+</span><span>                 }
+</span><span>             }
+</span><span>
+</span></code></pre>
+<p>Running this new version displays our new fancy progress bar in action!</p>
+<p><img src="/2022-10-03/progressbar.png" alt="Progress bar" /></p>
+<p>The processing speed and ETA confirm our previous observations.</p>
+<p>But can we go any faster?</p>
+<h2 id="scaling-up">Scaling up</h2>
+<p>We previously found that the program can test around 1389 passwords per second per worker when used with 3 workers.</p>
+<p>What about automatically sizing the number of workers according to the host?</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span> use std::sync::atomic::{AtomicBool, Ordering};
+</span><span> use std::sync::Arc;
+</span><span style="color:#bf616a;">-use std::thread::JoinHandle;
+</span><span style="color:#a3be8c;">+use std::thread::{available_parallelism, JoinHandle};
+</span><span> use std::{env, fs, thread};
+</span><span style="color:#a3be8c;">+use std::cmp::max;
+</span><span> 
+</span><span> pub fn start_password_reader(
+</span><span>     file_path: PathBuf,
+</span><span>@@ -151,7 +152,8 @@ </span><span style="color:#8fa1b3;">fn main() {
+</span><span>     let zip_path = env::args().nth(1).unwrap();
+</span><span>     let dictionary_path = &quot;/opt/xato-net-10-million-passwords.txt&quot;;
+</span><span style="color:#bf616a;">-    let workers = 3;
+</span><span style="color:#a3be8c;">+    let num_cores = available_parallelism().unwrap().get();
+</span><span style="color:#a3be8c;">+    let workers = max(1,  num_cores - 1);
+</span></code></pre>
+<p>With this change, we are using <code>num_core - 1</code> worker threads and one dictionary reader thread.</p>
+<p>On my 8 cores machine, it yields the following usage.</p>
+<p><img src="/2022-10-03/htop-7-workers.png" alt="CPU usage 7 workers" /></p>
+<p>This is a nice CPU utilization to keep you warm during the winter.</p>
+<p>Unfortunately, it does not seem to be much faster.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#96b5b4;">cd</span><span> /target/release
+</span><span style="color:#bf616a;">time</span><span> ./zip-password-finder encrypted-test-dict.zip
+</span><span style="color:#bf616a;">Password</span><span> found:vaanes
+</span><span>
+</span><span style="color:#bf616a;">real</span><span>  3m57,826s
+</span><span style="color:#bf616a;">user</span><span>  27m52,591s
+</span><span style="color:#bf616a;">sys</span><span>   0m9,621s
+</span></code></pre>
+<p>That is barely 30 seconds faster than the 3 workers version!</p>
+<p>It seems our program is suffering from scalability issues.</p>
+<p>To investigate this, let's start by making the number of workers configurable through the CLI.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span> fn main() {
+</span><span style="color:#bf616a;">-    let zip_path = env::args().nth(1).unwrap();
+</span><span style="color:#a3be8c;">+    let mut args_iter = env::args().skip(1);
+</span><span style="color:#a3be8c;">+    let zip_path = args_iter.next().unwrap();
+</span><span>     let dictionary_path = &quot;/opt/xato-net-10-million-passwords.txt&quot;;
+</span><span style="color:#bf616a;">-    let num_cores = available_parallelism().unwrap().get();
+</span><span style="color:#bf616a;">-    let workers = max(1,  num_cores - 1);
+</span><span style="color:#a3be8c;">+    let workers: usize = match args_iter.next() {
+</span><span style="color:#a3be8c;">+        None =&gt; {
+</span><span style="color:#a3be8c;">+            let num_cores = available_parallelism().unwrap().get();
+</span><span style="color:#a3be8c;">+            max(1, num_cores - 1)
+</span><span style="color:#a3be8c;">+        }
+</span><span style="color:#a3be8c;">+        Some(count) =&gt; count.parse().unwrap(),
+</span><span style="color:#a3be8c;">+    };
+</span></code></pre>
+<p>Then let's reach for our favorite CLI benchmarking tool, the fantastic <a href="https://github.com/sharkdp/hyperfine">hyperfine</a>.</p>
+<p>Using the following magic incantation, we will get reliable measurements for runs with different worker count.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hyperfine --runs</span><span> 2 \
+</span><span style="color:#bf616a;"> --warmup</span><span> 1 \
+</span><span style="color:#bf616a;"> --export-markdown</span><span> workers.md \
+</span><span style="color:#bf616a;"> --export-json</span><span> workers.json \
+</span><span style="color:#bf616a;"> -n</span><span> 1 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 1</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 2 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 2</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 3 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 3</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 4 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 4</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 5 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 5</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 6 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 6</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 7 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 7</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 8 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 8</span><span>&quot; 
+</span></code></pre>
+<p>After the runs, the <code>workers.md</code> file contains the following table:</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>1</code></td><td style="text-align: right">559.522 ± 7.091</td><td style="text-align: right">554.509</td><td style="text-align: right">564.536</td><td style="text-align: right">2.51 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>2</code></td><td style="text-align: right">338.590 ± 0.102</td><td style="text-align: right">338.518</td><td style="text-align: right">338.662</td><td style="text-align: right">1.52 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>3</code></td><td style="text-align: right">264.297 ± 0.650</td><td style="text-align: right">263.838</td><td style="text-align: right">264.757</td><td style="text-align: right">1.18 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>4</code></td><td style="text-align: right">223.284 ± 0.047</td><td style="text-align: right">223.251</td><td style="text-align: right">223.317</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>5</code></td><td style="text-align: right">224.617 ± 0.082</td><td style="text-align: right">224.559</td><td style="text-align: right">224.675</td><td style="text-align: right">1.01 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>6</code></td><td style="text-align: right">226.690 ± 0.421</td><td style="text-align: right">226.392</td><td style="text-align: right">226.987</td><td style="text-align: right">1.02 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>7</code></td><td style="text-align: right">232.129 ± 0.009</td><td style="text-align: right">232.122</td><td style="text-align: right">232.135</td><td style="text-align: right">1.04 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>8</code></td><td style="text-align: right">234.367 ± 0.118</td><td style="text-align: right">234.284</td><td style="text-align: right">234.450</td><td style="text-align: right">1.05 ± 0.00</td></tr>
+</tbody></table>
+<p>It looks quite bad. Let's plot it so that visual people can be disappointed as well.</p>
+<p><img src="/2022-10-03/whiskers.png" alt="Whiskers plot" /></p>
+<p>One would expect performance to grow linearly, but that is absolutely not the case here.</p>
+<p>Not only is the speedup not linear, but the program only gets faster up to 4 workers at approximately 4500 passwords/sec.</p>
+<p>Sounds like a good time to mention <a href="https://en.wikipedia.org/wiki/Amdahl%27s_law">Amdahl's law</a>, which predicts the theoretical speedup when using multiple processors depending on the portion of the work being parallel.</p>
+<p><img src="/2022-10-03/AmdahlsLaw-wiki.png" alt="AmdahlsLaw graph" /></p>
+<p>Our workload is <strong>supposed</strong> to be very parallelisable, each worker processing candidate passwords in isolation at full speed. We should be getting more impressive speedups.</p>
+<p>The simplest explanation is that our program is not as parallel as we thought. There must be some form of hidden coordination preventing our program from scaling properly.</p>
+<h2 id="hyper-threading">Hyper-threading</h2>
+<p>However, I find it very suspicious that the best performance occurs at 4 workers. This is a nice power of 2.</p>
+<p>I am running the benchmarks on a laptop running Linux on an Intel <a href="https://www.intel.com/content/www/us/en/products/sku/201896/intel-core-i710610u-processor-8m-cache-up-to-4-90-ghz/specifications.html">i7-10610U</a> CPU.</p>
+<p>Looking at the specification, we can see the following.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">lscpu
+</span><span style="color:#bf616a;">...
+</span><span style="color:#bf616a;">Vendor</span><span> ID:               GenuineIntel
+</span><span>  </span><span style="color:#bf616a;">Model</span><span> name:            Intel(R) </span><span style="color:#bf616a;">Core</span><span>(TM) </span><span style="color:#bf616a;">i7-10610U</span><span> CPU @ 1.80GHz
+</span><span>    </span><span style="color:#bf616a;">CPU</span><span> family:          6
+</span><span>    </span><span style="color:#bf616a;">Model:</span><span>               142
+</span><span>    </span><span style="color:#bf616a;">Thread</span><span>(s) </span><span style="color:#bf616a;">per</span><span> core:  2
+</span><span>    </span><span style="color:#bf616a;">Core</span><span>(s) </span><span style="color:#bf616a;">per</span><span> socket:  4
+</span></code></pre>
+<p>Instead of 8 cores, there are 4 physical cores and 2 logical threads per core!</p>
+<p>In my case this is <a href="https://en.wikipedia.org/wiki/Hyper-threading">Intel's Hyper-threading Technology</a>, which enables cores to have two lanes of execution. The core can switch between those while waiting for data to be fetched from main memory or caches.</p>
+<p>Outside of the various marketing performance claims from Intel, it seems that <code>Hyper-threading</code> is not adapted to all types of workload.</p>
+<p>Given our very CPU-heavy workload, in which we need the full attention of each core on a single worker. It makes sense to not rely on it and only use the number of physical cores to size the number of workers.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">cargo</span><span> add num_cpus
+</span></code></pre>
+<p>The previous benchmark has also shown that the best performance occurs where the number of workers is equal to the number cores, meaning that the reader thread is very cheap in comparison.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span>     let workers: usize = match args_iter.next() {
+</span><span style="color:#bf616a;">-        None =&gt; {
+</span><span style="color:#bf616a;">-            let num_cores = available_parallelism().unwrap().get();
+</span><span style="color:#bf616a;">-            max(1, num_cores - 1)
+</span><span style="color:#bf616a;">-        }
+</span><span style="color:#a3be8c;">+        None =&gt; num_cpus::get_physical(),
+</span><span>         Some(count) =&gt; count.parse().unwrap(),
+</span><span>     };
+</span><span>
+</span></code></pre>
+<p>Hopefully, those workers will be allocated to different cores even if the host supports <code>Hyper-threading</code> for maximum efficiency.</p>
+<h2 id="going-faster">Going faster</h2>
+<p>Even limiting ourselves to physical cores, the scaling from one to four cores was not entirely linear.</p>
+<p>For a quick sanity check, we can generate a flamegraph to see where the CPU time is spent.</p>
+<p><img src="/2022-10-03/flamegraph.png" alt="Flamegraph" /></p>
+<p>The various threads are nicely visible (full <a href="/2022-10-03/flamegraph.svg">flamegraph</a> available).</p>
+<p>It seems the reader thread spends most of its time snoozing, blocked when the channel is full, meaning that it is not a bottleneck.</p>
+<p>We can zoom in on one of the workers.</p>
+<p><img src="/2022-10-03/flamegraph-worker.png" alt="Flamegraph" /></p>
+<p>It is basically spending most of its time in <code>sha1::compress::soft::compress</code> in a deep call stack from <code>zip-rs</code>.</p>
+<p>There is nothing obvious to optimize from our worker code  given the decryption API we have to work with.</p>
+<p>We can focus on decreasing potential synchronization issues between our worker threads. When can they possibly interfere with each other?</p>
+<p>Looking at the code closely, we can see that for every password candidate the workers are accessing:</p>
+<ul>
+<li>the receive channel handle</li>
+<li>the shutdown signal</li>
+<li>the progress bar</li>
+</ul>
+<p>A first hypothesis is that those actions increase the cost of processing a single candidate and introduce some form of coordination between threads as they are accessing shared memory.</p>
+<p>A naive approach to reducing coordination is to give more to the workers to process in isolation by, for instance, batching up a bunch of candidates together in the channel.</p>
+<p>What would the optimal batch size be? Let's implement batching and make the batch size configurable in place of the &quot;workers&quot; argument for a quick experiment.</p>
+<p>First batching the reader thread:</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span> pub fn start_password_reader(
+</span><span>     file_path: PathBuf,
+</span><span style="color:#bf616a;">-    send_password: Sender&lt;String&gt;,
+</span><span style="color:#a3be8c;">+    send_password: Sender&lt;Vec&lt;String&gt;&gt;,
+</span><span style="color:#a3be8c;">+    batch_size: usize,
+</span><span>     stop_signal: Arc&lt;AtomicBool&gt;,
+</span><span> ) -&gt; JoinHandle&lt;()&gt; {
+</span><span>     thread::Builder::new()
+</span><span>@@ -19,13 +20,18 @@ </span><span style="color:#8fa1b3;">pub fn start_password_reader(
+</span><span>         .spawn(move || {
+</span><span>             let file = File::open(file_path).unwrap();
+</span><span>             let reader = BufReader::new(file);
+</span><span style="color:#a3be8c;">+            let mut batch = Vec::with_capacity(batch_size);
+</span><span>             for line in reader.lines() {
+</span><span style="color:#bf616a;">-                if stop_signal.load(Ordering::Relaxed) {
+</span><span style="color:#bf616a;">-                    break;
+</span><span style="color:#bf616a;">-                } else {
+</span><span style="color:#bf616a;">-                    match send_password.send(line.unwrap()) {
+</span><span style="color:#bf616a;">-                        Ok(_) =&gt; {}
+</span><span style="color:#bf616a;">-                        Err(_) =&gt; break, // channel disconnected, stop thread
+</span><span style="color:#a3be8c;">+                batch.push(line.unwrap());
+</span><span style="color:#a3be8c;">+                // push once the batch is full
+</span><span style="color:#a3be8c;">+                if batch.len() == batch_size {
+</span><span style="color:#a3be8c;">+                    if stop_signal.load(Ordering::Relaxed) {
+</span><span style="color:#a3be8c;">+                        break;
+</span><span style="color:#a3be8c;">+                    } else {
+</span><span style="color:#a3be8c;">+                        match send_password.send(batch.clone()) {
+</span><span style="color:#a3be8c;">+                            Ok(_) =&gt; batch.clear(),
+</span><span style="color:#a3be8c;">+                            Err(_) =&gt; break, // channel disconnected, stop thread
+</span><span style="color:#a3be8c;">+                        }
+</span><span>                     }
+</span></code></pre>
+<p>Then the worker thread:</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span> pub fn password_checker(
+</span><span>     index: usize,
+</span><span>     file_path: &amp;Path,
+</span><span style="color:#bf616a;">-    receive_password: Receiver&lt;String&gt;,
+</span><span style="color:#a3be8c;">+    receive_password: Receiver&lt;Vec&lt;String&gt;&gt;,
+</span><span>     stop_signal: Arc&lt;AtomicBool&gt;,
+</span><span>     send_password_found: Sender&lt;String&gt;,
+</span><span>     progress_bar: ProgressBar,
+</span><span>@@ -49,26 +55,30 @@ </span><span style="color:#8fa1b3;">pub fn password_checker(
+</span><span>             while !stop_signal.load(Ordering::Relaxed) {
+</span><span>                 match receive_password.recv() {
+</span><span>                     Err(_) =&gt; break, // channel disconnected, stop thread
+</span><span style="color:#bf616a;">-                    Ok(password) =&gt; {
+</span><span style="color:#bf616a;">-                        let res = archive.by_index_decrypt(0, password.as_bytes());
+</span><span style="color:#bf616a;">-                        match res {
+</span><span style="color:#bf616a;">-                            Err(e) =&gt; panic!(&quot;Unexpected error {:?}&quot;, e),
+</span><span style="color:#bf616a;">-                            Ok(Err(_)) =&gt; (), // invalid password - continue
+</span><span style="color:#bf616a;">-                            Ok(Ok(mut zip)) =&gt; {
+</span><span style="color:#bf616a;">-                                // Validate password by reading the zip file to make sure it is not merely a hash collision.
+</span><span style="color:#bf616a;">-                                let mut buffer = Vec::with_capacity(zip.size() as usize);
+</span><span style="color:#bf616a;">-                                match zip.read_to_end(&amp;mut buffer) {
+</span><span style="color:#bf616a;">-                                    Err(_) =&gt; (), // password collision - continue
+</span><span style="color:#bf616a;">-                                    Ok(_) =&gt; {
+</span><span style="color:#bf616a;">-                                        // Send password and continue processing while waiting for signal
+</span><span style="color:#bf616a;">-                                        send_password_found
+</span><span style="color:#bf616a;">-                                            .send(password)
+</span><span style="color:#bf616a;">-                                            .expect(&quot;Send found password should not fail&quot;);
+</span><span style="color:#a3be8c;">+                    Ok(passwords) =&gt; {
+</span><span style="color:#a3be8c;">+                        let passwords_len = passwords.len() as u64;
+</span><span style="color:#a3be8c;">+                        // process batch
+</span><span style="color:#a3be8c;">+                        for password in passwords {
+</span><span style="color:#a3be8c;">+                            let res = archive.by_index_decrypt(0, password.as_bytes());
+</span><span style="color:#a3be8c;">+                            match res {
+</span><span style="color:#a3be8c;">+                                Err(e) =&gt; panic!(&quot;Unexpected error {:?}&quot;, e),
+</span><span style="color:#a3be8c;">+                                Ok(Err(_)) =&gt; (), // invalid password - continue
+</span><span style="color:#a3be8c;">+                                Ok(Ok(mut zip)) =&gt; {
+</span><span style="color:#a3be8c;">+                                    // Validate password by reading the zip file to make sure it is not merely a hash collision.
+</span><span style="color:#a3be8c;">+                                    let mut buffer = Vec::with_capacity(zip.size() as usize);
+</span><span style="color:#a3be8c;">+                                    match zip.read_to_end(&amp;mut buffer) {
+</span><span style="color:#a3be8c;">+                                        Err(_) =&gt; (), // password collision - continue
+</span><span style="color:#a3be8c;">+                                        Ok(_) =&gt; {
+</span><span style="color:#a3be8c;">+                                            // Send password and continue processing while waiting for signal
+</span><span style="color:#a3be8c;">+                                            send_password_found
+</span><span style="color:#a3be8c;">+                                                .send(password)
+</span><span style="color:#a3be8c;">+                                                .expect(&quot;Send found password should not fail&quot;);
+</span><span style="color:#a3be8c;">+                                        }
+</span><span>                                     }
+</span><span>                                 }
+</span><span>                             }
+</span><span>                         }
+</span><span style="color:#bf616a;">-                        progress_bar.inc(1);
+</span><span style="color:#a3be8c;">+                        progress_bar.inc(passwords_len);
+</span><span>                     }
+</span><span>                 }
+</span><span>             }
+</span></code></pre>
+<p>And a bit of wiring up:</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span style="color:#bf616a;">-pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize) -&gt; Option&lt;String&gt; {
+</span><span style="color:#a3be8c;">+pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize, batch_size: usize) -&gt; Option&lt;String&gt; {
+</span><span>     let zip_file_path = Path::new(zip_path);
+</span><span>     let password_list_file_path = Path::new(password_list_path).to_path_buf();
+</span><span> 
+</span><span>@@ -97,7 +107,7 @@ </span><span style="color:#8fa1b3;">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)
+</span><span>     progress_bar.set_length(total_password_count as u64);
+</span><span> 
+</span><span>     // MPMC channel with backpressure
+</span><span style="color:#bf616a;">-    let (send_password, receive_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =
+</span><span style="color:#a3be8c;">+    let (send_password, receive_password): (Sender&lt;Vec&lt;String&gt;&gt;, Receiver&lt;Vec&lt;String&gt;&gt;) =
+</span><span>         crossbeam_channel::bounded(workers * 10_000);
+</span><span> 
+</span><span>     let (send_found_password, receive_found_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =
+</span><span>@@ -111,6 +121,7 @@ </span><span style="color:#8fa1b3;">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)
+</span><span>     let password_gen_handle = start_password_reader(
+</span><span>         password_list_file_path,
+</span><span>         send_password,
+</span><span style="color:#a3be8c;">+        batch_size,
+</span><span>         stop_gen_signal.clone(),
+</span><span>     );
+</span><span> 
+</span><span>@@ -153,12 +164,11 @@ </span><span style="color:#8fa1b3;">fn main() {
+</span><span>     let zip_path = args_iter.next().unwrap();
+</span><span>     let dictionary_path =
+</span><span>         &quot;/home/agourlay/Workspace/blog-data/find-password-zip/xato-net-10-million-passwords.txt&quot;;
+</span><span style="color:#bf616a;">-    let workers: usize = match args_iter.next() {
+</span><span style="color:#bf616a;">-        None =&gt; num_cpus::get_physical(),
+</span><span style="color:#bf616a;">-        Some(count) =&gt; count.parse().unwrap(),
+</span><span style="color:#bf616a;">-    };
+</span><span style="color:#a3be8c;">+    let batch_size: usize = args_iter.next().unwrap().parse().unwrap();
+</span><span style="color:#a3be8c;">+
+</span><span style="color:#a3be8c;">+    let workers: usize = num_cpus::get_physical();
+</span><span> 
+</span><span style="color:#bf616a;">-    match password_finder(&amp;zip_path, dictionary_path, workers) {
+</span><span style="color:#a3be8c;">+    match password_finder(&amp;zip_path, dictionary_path, workers, batch_size) {
+</span><span>         Some(password_found) =&gt; println!(&quot;Password found:{}&quot;, password_found),
+</span><span>         None =&gt; println!(&quot;No password found :(&quot;),
+</span><span>     }
+</span></code></pre>
+<p>Using Hyperfine again, we will compare different batch sizes.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hyperfine --runs</span><span> 2 \
+</span><span style="color:#bf616a;"> --warmup</span><span> 1 \
+</span><span style="color:#bf616a;"> --export-markdown</span><span> batch.md \
+</span><span style="color:#bf616a;"> --export-json</span><span> batch.json \
+</span><span style="color:#bf616a;"> -n</span><span> 10 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 10</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 50 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 10</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 100 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 100</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 500 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 500</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 1000 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 1000</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 5000 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 5000</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 10000 &quot;</span><span style="color:#a3be8c;">./zip-password-finder encrypted-test-dict.zip 10000</span><span>&quot; 
+</span></code></pre>
+<p>It seems <code>1000</code> yields the best results.</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>10</code></td><td style="text-align: right">234.756 ± 0.292</td><td style="text-align: right">234.550</td><td style="text-align: right">234.963</td><td style="text-align: right">1.09 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>50</code></td><td style="text-align: right">226.616 ± 9.372</td><td style="text-align: right">219.989</td><td style="text-align: right">233.243</td><td style="text-align: right">1.05 ± 0.04</td></tr>
+<tr><td style="text-align: left"><code>100</code></td><td style="text-align: right">216.498 ± 1.364</td><td style="text-align: right">215.534</td><td style="text-align: right">217.462</td><td style="text-align: right">1.00 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>500</code></td><td style="text-align: right">217.122 ± 1.992</td><td style="text-align: right">215.714</td><td style="text-align: right">218.531</td><td style="text-align: right">1.00 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>1000</code></td><td style="text-align: right">216.080 ± 0.066</td><td style="text-align: right">216.033</td><td style="text-align: right">216.127</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>5000</code></td><td style="text-align: right">218.929 ± 0.114</td><td style="text-align: right">218.848</td><td style="text-align: right">219.009</td><td style="text-align: right">1.01 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>10000</code></td><td style="text-align: right">222.792 ± 0.213</td><td style="text-align: right">222.642</td><td style="text-align: right">222.943</td><td style="text-align: right">1.03 ± 0.00</td></tr>
+</tbody></table>
+<p>However, the version without batching for 4 cores used to run in 224 seconds. That's only an 8 second improvement. I am not sure it is worth the added complexity.</p>
+<p>We started from a wild guess regarding the source of the synchronization, so we should not be surprised by the disappointing results.</p>
+<p>We are stopping the performance investigation here in order to save some content for the future :)</p>
+<h2 id="password-generator">Password generator</h2>
+<p>Our dictionary approach was great to get us started, but in real life, it is rather improbable to find the password you are targeting within a dictionary.</p>
+<p>Well, at least it did not work for me.</p>
+<p>A password generator is present in the final code available at <a href="https://github.com/agourlay/zip-password-finder">zip-password-finder</a> but I won't go into the implementation details because the code is rather ugly and does not add much at this point.</p>
+<p>What we need is to generate all the possible passwords based on a set of constraints.</p>
+<p>First, the minimum and maximum length to generate. For instance, between 3 and 7 characters.</p>
+<p>Second, the charset to use. It could be only letters, with uppercase, maybe with digits and punctuation.</p>
+<p>We can compute the number of passwords possible based on those constraints.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">let mut</span><span> total_password_count = </span><span style="color:#d08770;">0</span><span>;
+</span><span style="color:#b48ead;">for</span><span> i in min_password_len..=max_password_len {
+</span><span>    total_password_count += charset_len.</span><span style="color:#96b5b4;">pow</span><span>(i as </span><span style="color:#b48ead;">u32</span><span>)
+</span><span>}
+</span></code></pre>
+<p>Here is an example to convince yourself that this grows very fast.</p>
+<p>Given a charset with lowercase letters, upper case laters and digits. Forming a set of <code>26 + 26 + 10 = 62</code> elements.</p>
+<p>A simple 7 characters passwords using elements from this charset yields <code>62^7 = 3.521.614.606.208</code> combinations.</p>
+<p><code>62^7 passwords / 4500 passwords per sec / 60 / 60 / 24 / 365 =~ 25 years</code></p>
+<p>A naive brute force strategy requires much better performance to be tractable.</p>
+<h2 id="future-work">Future work</h2>
+<p>I still have not found the password for the archive that spawned this experiment and article.</p>
+<p>However, given the current throughput, I'd have to let the program run for much longer than I am comfortable with.</p>
+<p>Fixing the scalability issue is the most important task to make this application run efficiently on machines with a higher core count.</p>
+<p>Then, improving the nominal performance per worker by investigating possible gains in the <code>zip.rs</code> crate or a different approach to get a multiplying effect.</p>
+<p>I will make sure to document my progress in a follow-up article.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>In this article we have built a simple tool in Rust to brute force the password of protected ZIP archives.</p>
+<p>It can process around 4500 passwords/sec on 4 cores machines and has issues scaling up which makes it impractical for non trivial passwords.</p>
+<p>To get there we have learned how to apply the <code>pool of workers</code> pattern and how to shut it down gracefully.</p>
+<p>We also learned how to measure performance in a systematic way and discussed scalability expectations.</p>
+<p>At a more general level, we confirmed that long passwords are very efficient against brute force attacks.</p>
+<p>This fact has been very well described in this <a href="https://xkcd.com/936/">xkcd</a> comic.</p>
+<p><img src="/2022-10-03/xkcd_password_strength.png" alt="XKCD 936" /></p>
+<p>And that's all for today, I hope you learned a thing or two on the way - thank you for making it to the end!</p>
+<p>If you want to play with the application, the full code with better error handling &amp; proper CLI is available at <a href="https://github.com/agourlay/zip-password-finder">zip-password-finder</a>.</p>
+<p><strong><em>Update: the article submission on <a href="https://www.reddit.com/r/rust/comments/xv94o6/brute_forcing_protected_zip_archives_in_rust/">reddit/r/rust</a> contains excellent comments.</em></strong></p>
+
+    </div>
+
+    
+    <div class="article-info">
+        
+        <div class="article-date"> 3 October 2022</div>
+        
+        <div class="article-taxonomies">
+            
+            
+                <ul class="article-tags">
+                    
+                    <li><a href=" https://agourlay.github.io/tags/rust/">#Rust</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/security/">#security</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/multithreading/">#multithreading</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/benchmarking/">#benchmarking</a></li>
+                    
+                </ul>
+            
+        </div>
+    </div>
+
+</article>
+
+
+        </main>
+        <footer>
+            <p>
+                © Arnaud Gourlay&#x27;s blog 2025<br>
+                Powered by <a target="_blank" href="https://getzola.org/">Zola</a>, Theme <a target="_blank" href="https://github.com/zbrox/anpu-zola-theme">Anpu</a>.
+            </p>
+            <p>
+                
+                
+            </p>
+        </footer>
+    </div>
+
+    <div class="dark-mode-buttons">
+  <button class="dark-mode-button" id="dark-mode-on">
+    <img
+      src=" https://agourlay.github.io/dark_mode.svg"
+      width="24"
+      height="24"
+      alt="Dark mode"
+      aria-label="dark mode toggle"
+      title="Dark mode"
+    />
+  </button>
+  <button class="dark-mode-button" id="dark-mode-off">
+    <img
+      src=" https://agourlay.github.io/light_mode.svg "
+      width="24"
+      height="24"
+      alt="Light mode"
+      aria-label="light mode toggle"
+      title="Light mode"
+      style="filter: invert(1);"
+    />
+  </button>
+</div>
+<script>
+  const cls = document.body.classList;
+  const getSessionTheme = sessionStorage.getItem("theme");
+  if (getSessionTheme === "dark") {
+    cls.toggle("dark-mode", true);
+  } else if (getSessionTheme === "light") {
+    cls.toggle("dark-mode", false);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    cls.toggle("dark-mode", true);
+  }
+  document
+    .getElementById("dark-mode-on")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", true);
+      sessionStorage.setItem("theme", "dark");
+    });
+  document
+    .getElementById("dark-mode-off")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", false);
+      sessionStorage.setItem("theme", "light");
+    });
+</script>
+<noscript>
+  <style>
+    .dark-mode-buttons {
+      display: none;
+    }
+  </style>
+</noscript>
+
+    
+</body>
+</html>

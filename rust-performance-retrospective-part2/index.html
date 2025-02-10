@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+
+    <title>A performance retrospective using Rust (part 2)</title>
+    <meta name="description" content="Yet another programming blog">
+
+    <link rel="stylesheet" href=" https://agourlay.github.io/main.css">
+
+    
+        <link rel="alternate" type="application/atom+xml" title="RSS" href=" https://agourlay.github.io/atom.xml">
+    
+
+    
+    
+</head>
+<body>
+    <a class="skip-main" href="#main">Skip to content</a>
+    <div class="container">
+        <header> 
+            <h1 class="site-header">
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io">Arnaud Gourlay&#x27;s blog</a>
+            </h1>
+            <nav>
+                
+                
+                
+                <a  href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;">Tags</a>
+                
+                
+                <a  href="&#x2F;pages&#x2F;about">About</a>
+                
+                
+            </nav>
+        </header>
+        <main id="main" tabindex="-1">
+            
+
+<article class="post">
+    <header>
+        <h1>A performance retrospective using Rust (part 2)</h1>
+    </header>
+    <div class="content">
+        <p>This article is the second part of a performance retrospective regarding the <a href="https://github.com/agourlay/hprof-slurp">hprof-slurp</a> project. It is highly recommended to start with the <a href="/rust-performance-retrospective-part1/">first part</a> to get a good grasp of the context.</p>
+<p>We left off after a presentation of the project and a detailed description of the benchmarking methodology used to measure performance gains.</p>
+<p>In this article we will focus on a specific issue that has been plaguing the 0.3.x series.</p>
+<h2 id="avoiding-memcopy">Avoiding memcopy</h2>
+<p>As the program got faster, I witnessed the <code>memcpy</code> instructions slowly creeping up in the flamegraphs to the point where they accounted for most of the computation.</p>
+<p>Below - in purple - you can see the <code>_memcpy_avx_unaligned_erms</code> representing most of the work in the parser thread (full <a href="/2022-07-23/flamegraph-0.3.3.svg">flamegraph</a>).</p>
+<p><img src="/2022-07-23/flamegraph-memcopy.png" alt="Flamegraph with memcopy" /></p>
+<p>At first, I thought it was an inherent cost of parsing large files, but as it grew to become the largest bottleneck in <code>hprof-slurp</code>, I decided to investigate the issue to - at the very least - understand it.</p>
+<p>I found the answer to this mystery in the fantastic <a href="https://nnethercote.github.io/perf-book/type-sizes.html">Rust performance book</a>.</p>
+<blockquote>
+<p>Rust types that are larger than 128 bytes are copied with memcpy rather than inline code.
+Shrinking these types to 128 bytes or less can make the code faster by avoiding memcpy calls and reducing memory traffic.</p>
+</blockquote>
+<p>Therefore, within my code I needed to find the large types that are used very often on the parser's path.</p>
+<p>Let's generate the type sizes with:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">RUSTFLAGS</span><span>=</span><span style="color:#a3be8c;">-Zprint-type-sizes </span><span style="color:#bf616a;">cargo</span><span> +nightly build</span><span style="color:#bf616a;"> --release
+</span></code></pre>
+<p>In my opinion, it can be a bit cumbersome to navigate the output of <code>-Zprint-type-sizes</code>.</p>
+<p>One alternative recommended by the Rust performance book is to use  DHAT’s “copy profiling” mode, which works great as well.</p>
+<p>I will stick to <code>-Zprint-type-sizes</code> for the remainder of the article as it helps understand the memory layout on the way.</p>
+<p>Looking at the types I own in the output section, we can find the following</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">print-type-size</span><span> type: `</span><span style="color:#bf616a;">parser::record::Record</span><span>`: 136 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     discriminant: 2 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     variant `</span><span style="color:#bf616a;">GcSegment</span><span>`: 134 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 6 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.0</span><span>`: 128 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     variant `</span><span style="color:#bf616a;">AllocationSites</span><span>`: 62 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.flags</span><span>`: 2 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.cutoff_ratio</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.total_live_bytes</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.total_live_instances</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.number_of_sites</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.total_bytes_allocated</span><span>`: 8 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.total_instances_allocated</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.allocation_sites</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">...</span><span> more variants with decreasing size
+</span></code></pre>
+<p>The <code>parser::record::Record</code> is an enum which represents all possible top-level records found in an <code>hprof</code> file.</p>
+<p>The largest variant is <code>GcSegment</code>, with 134 bytes, which is larger than the 128 bytes mentioned above.</p>
+<p>The corresponding Rust code looks like the following:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">pub enum </span><span>Record {
+</span><span>  GcSegment(GcRecord),
+</span><span>  AllocationSites {
+</span><span>    flags: </span><span style="color:#b48ead;">u16</span><span>,
+</span><span>    cutoff_ratio: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>    total_live_bytes: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>    total_live_instances: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>    total_bytes_allocated: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>    total_instances_allocated: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>    number_of_sites: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>    allocation_sites: Vec&lt;AllocationSite&gt;,
+</span><span>  },
+</span><span>  ... more variants
+</span><span>}  
+</span></code></pre>
+<p>The <code>parser::gc_record::GcRecord</code> is itself an enum as well. It models all possible elements found on the JVM's heap.</p>
+<p>Let's find in the output the size of a <code>GcRecord</code>.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">print-type-size</span><span> type: `</span><span style="color:#bf616a;">parser::gc_record::GcRecord</span><span>`: 128 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     discriminant: 1 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     variant `</span><span style="color:#bf616a;">ClassDump</span><span>`: 127 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 1 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.constant_pool_size</span><span>`: 2 bytes, alignment: 2 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.stack_trace_serial_number</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.instance_size</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.class_object_id</span><span>`: 8 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.super_class_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.class_loader_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.signers_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.protection_domain_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.const_fields</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.static_fields</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.instance_fields</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     variant `</span><span style="color:#bf616a;">ObjectArrayDump</span><span>`: 55 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 3 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.stack_trace_serial_number</span><span>`: 4 bytes, alignment: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.number_of_elements</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.object_id</span><span>`: 8 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.array_class_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.elements</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">...</span><span> more variant with decreasing size
+</span></code></pre>
+<p>For the following definition:</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">pub enum </span><span>GcRecord {
+</span><span>    ClassDump {
+</span><span>        class_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        stack_trace_serial_number: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        super_class_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        class_loader_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        signers_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        protection_domain_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        instance_size: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        constant_pool_size: </span><span style="color:#b48ead;">u16</span><span>,
+</span><span>        const_fields: Vec&lt;(ConstFieldInfo, FieldValue)&gt;,
+</span><span>        static_fields: Vec&lt;(FieldInfo, FieldValue)&gt;,
+</span><span>        instance_fields: Vec&lt;FieldInfo&gt;,
+</span><span>    },
+</span><span>    ObjectArrayDump {
+</span><span>        object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        stack_trace_serial_number: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        number_of_elements: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        array_class_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        elements: Vec&lt;</span><span style="color:#b48ead;">u64</span><span>&gt;,
+</span><span>    },
+</span><span>    ... more variants
+</span><span>}
+</span></code></pre>
+<p>At this point, we can see that there is logically a direct mapping between the fields of the structs and their actual sizes.</p>
+<p>Moreover, there is a critical observation to make regarding enums.</p>
+<p><strong>Enums are sized according to the largest variant</strong>.</p>
+<p>An enum is sized with its largest variant plus some memory for an internal discriminant field.</p>
+<p>This means the 134 bytes for a <code>GcSegment</code> are being allocated for every <code>parser::record::Record</code> variants.</p>
+<p>This quickly adds up when a program is crunching millions of records.</p>
+<p>The common wisdom for decreasing the stack memory footprint is to use heap allocation, often referred to as boxing.</p>
+<p>Let's try boxing the content of <code>GcSegment</code>.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span>GcSegment(Box&lt;GcRecord&gt;),
+</span></code></pre>
+<p>This change gives the following type sizes (after applying the necessary modifications to handle the new Box type at the call sites).</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">print-type-size</span><span> type: `</span><span style="color:#bf616a;">parser::record::Record</span><span>`: 64 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     discriminant: 2 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     variant `</span><span style="color:#bf616a;">AllocationSites</span><span>`: 62 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.flags</span><span>`: 2 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.cutoff_ratio</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.total_live_bytes</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.total_live_instances</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.number_of_sites</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.total_bytes_allocated</span><span>`: 8 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.total_instances_allocated</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.allocation_sites</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">...</span><span> more variant with decreasing size
+</span><span style="color:#bf616a;">print-type-size</span><span>     variant `</span><span style="color:#bf616a;">GcSegment</span><span>`: 14 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 6 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.0</span><span>`: 8 bytes, alignment: 8 bytes
+</span></code></pre>
+<p>Looking good!</p>
+<p>The type <code>parser::record::Record</code> went from 136 bytes to 64 bytes because all variants are now sized according to the next largest variant, <code>AllocationSites</code> at 62 bytes.</p>
+<p>The <code>memcpy</code> should not be a problem anymore.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hyperfine --runs</span><span> 3 \
+</span><span style="color:#bf616a;"> --export-markdown</span><span> hprof.md \
+</span><span style="color:#bf616a;"> -n</span><span> 0.3.3 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.3.3 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> box &quot;</span><span style="color:#a3be8c;">./hprof-slurp -i pets.bin</span><span>&quot;
+</span></code></pre>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.3.3</code></td><td style="text-align: right">77.442 ± 2.537</td><td style="text-align: right">74.513</td><td style="text-align: right">78.968</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>box</code></td><td style="text-align: right">270.785 ± 0.907</td><td style="text-align: right">270.031</td><td style="text-align: right">271.792</td><td style="text-align: right">3.50 ± 0.12</td></tr>
+</tbody></table>
+<p>Ouch! It is over three times times slower!</p>
+<p>Let's have a look at the flamegraph to understand where the CPU spends its time.</p>
+<p><img src="/2022-07-23/flamegraph-box.png" alt="Flamegraph with boxing" /></p>
+<p>In purple you can see the cost of <code>Box::new</code> in the parser thread (full <a href="/2022-07-23/flamegraph-box.svg">flamegraph</a> available).</p>
+<p>Welp, we did fix the <code>memcpy</code> issue, but the application is terribly slow.</p>
+<p>Boxing is, unfortunately, not some kind of magic sauce that will fix all our problems.</p>
+<p>Performing heap allocation has a higher cost than stack allocation, and we are now performing it for each instance found in the JVM heap dump.</p>
+<h2 id="reasonable-boxing">Reasonable boxing</h2>
+<p>In the previous section, we have seen that <code>GcSegment</code> cannot be boxed efficiently because it appears too frequently during the execution of the application.</p>
+<p>We also have seen that the largest variant of <code>GcSegment</code> is <code>ClassDump</code>, clocking in at 127 bytes.</p>
+<p>Based on the enumeration sizing discovery, we know that the 127 bytes for a <code>ClassDump</code> are being allocated for every <code>GcSegment</code> record.</p>
+<p>However, the <code>ClassDump</code> is a relatively rare element compared to the actual instance dumps. An application has a few hundred classes but millions of instances.</p>
+<p>It is unfortunate to systematically pay the full price for something that is unfrequent.</p>
+<p>The intuition is that we should be moving the boxing cost to the <code>ClassDump</code> only.</p>
+<p>Let's try to box the individual fields in <code>ClassDump</code> instead.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">pub enum </span><span>GcRecord {
+</span><span>    ClassDump {
+</span><span>        class_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        stack_trace_serial_number: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        super_class_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        class_loader_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        signers_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        protection_domain_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        instance_size: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        constant_pool_size: </span><span style="color:#b48ead;">u16</span><span>,
+</span><span>        const_fields: Vec&lt;(ConstFieldInfo, FieldValue)&gt;,
+</span><span>        static_fields: Vec&lt;(FieldInfo, FieldValue)&gt;,
+</span><span>        instance_fields: Vec&lt;FieldInfo&gt;,
+</span><span>    }
+</span><span>    ...
+</span><span>}   
+</span></code></pre>
+<p>The <code>Vector</code> type contains three words: a length, a capacity, and a pointer. That is 3 * 8 = 24 bytes on a 64-bits architecture.</p>
+<p>Boxing each vector would save 16 bytes per field.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">pub enum </span><span>GcRecord {
+</span><span>    ClassDump {
+</span><span>        class_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        stack_trace_serial_number: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        super_class_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        class_loader_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        signers_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        protection_domain_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        instance_size: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        constant_pool_size: </span><span style="color:#b48ead;">u16</span><span>,
+</span><span>        const_fields: Box&lt;Vec&lt;(ConstFieldInfo, FieldValue)&gt;&gt;,
+</span><span>        static_fields: Box&lt;Vec&lt;(FieldInfo, FieldValue)&gt;&gt;,
+</span><span>        instance_fields: Box&lt;Vec&lt;FieldInfo&gt;&gt;,
+</span><span>    }
+</span><span>    ...
+</span><span>}    
+</span></code></pre>
+<p>Fetching the new type's size yields the following:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">print-type-size</span><span> type: `</span><span style="color:#bf616a;">parser::gc_record::GcRecord</span><span>`: 80 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     discriminant: 1 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     variant `</span><span style="color:#bf616a;">ClassDump</span><span>`: 79 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 1 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.constant_pool_size</span><span>`: 2 bytes, alignment: 2 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.stack_trace_serial_number</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.instance_size</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.class_object_id</span><span>`: 8 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.super_class_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.class_loader_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.signers_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.protection_domain_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.const_fields</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.static_fields</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.instance_fields</span><span>`: 8 bytes
+</span></code></pre>
+<p>This is exactly what we were expecting; one word per boxed field.</p>
+<p>But we have learned the hard way not to celebrate prematurely before checking how it pans out in a benchmark.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hyperfine --runs</span><span> 3 \
+</span><span style="color:#bf616a;"> --export-markdown</span><span> hprof.md \
+</span><span style="color:#bf616a;"> -n</span><span> 0.3.3 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.3.3 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> boxes &quot;</span><span style="color:#a3be8c;">./hprof-slurp -i pets.bin</span><span>&quot;
+</span></code></pre>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.3.3</code></td><td style="text-align: right">76.691 ± 3.326</td><td style="text-align: right">73.080</td><td style="text-align: right">79.629</td><td style="text-align: right">1.12 ± 0.05</td></tr>
+<tr><td style="text-align: left"><code>boxes</code></td><td style="text-align: right">68.625 ± 1.262</td><td style="text-align: right">67.202</td><td style="text-align: right">69.605</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>It runs 11% faster. It's not bad for such a small change!</p>
+<p>But let's try to go faster by reducing the size of the <code>ClassDump</code> variant even more.</p>
+<pre data-lang="rust" style="background-color:#2b303b;color:#c0c5ce;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#b48ead;">pub struct </span><span>ClassDumpFields {
+</span><span>    </span><span style="color:#bf616a;">const_fields</span><span>: Vec&lt;(ConstFieldInfo, FieldValue)&gt;,
+</span><span>    </span><span style="color:#bf616a;">static_fields</span><span>: Vec&lt;(FieldInfo, FieldValue)&gt;,
+</span><span>    </span><span style="color:#bf616a;">instance_fields</span><span>: Vec&lt;FieldInfo&gt;,
+</span><span>}
+</span><span>
+</span><span style="color:#b48ead;">pub enum </span><span>GcRecord {
+</span><span>    ClassDump {
+</span><span>        class_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        stack_trace_serial_number: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        super_class_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        class_loader_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        signers_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        protection_domain_object_id: </span><span style="color:#b48ead;">u64</span><span>,
+</span><span>        instance_size: </span><span style="color:#b48ead;">u32</span><span>,
+</span><span>        constant_pool_size: </span><span style="color:#b48ead;">u16</span><span>,
+</span><span>        fields: Box&lt;ClassDumpFields&gt;,
+</span><span>    }
+</span><span>    ...
+</span><span>}    
+</span></code></pre>
+<p>Which has the following type size:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">print-type-size</span><span> type: `</span><span style="color:#bf616a;">parser::gc_record::ClassDumpFields</span><span>`: 72 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     field `</span><span style="color:#bf616a;">.const_fields</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     field `</span><span style="color:#bf616a;">.static_fields</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     field `</span><span style="color:#bf616a;">.instance_fields</span><span>`: 24 bytes
+</span><span style="color:#bf616a;">...
+</span><span style="color:#bf616a;">print-type-size</span><span> type: `</span><span style="color:#bf616a;">parser::gc_record::GcRecord</span><span>`: 64 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     discriminant: 1 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>     variant `</span><span style="color:#bf616a;">ClassDump</span><span>`: 63 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 1 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.constant_pool_size</span><span>`: 2 bytes, alignment: 2 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.stack_trace_serial_number</span><span>`: 4 ytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.instance_size</span><span>`: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         padding: 4 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.class_object_id</span><span>`: 8 bytes, alignment: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.super_class_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.class_loader_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.signers_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.protection_domain_object_id</span><span>`: 8 bytes
+</span><span style="color:#bf616a;">print-type-size</span><span>         field `</span><span style="color:#bf616a;">.fields</span><span>`: 8 bytes
+</span></code></pre>
+<p>We shaved off 16 more bytes.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hyperfine --runs</span><span> 3 \
+</span><span style="color:#bf616a;"> --export-markdown</span><span> hprof.md \
+</span><span style="color:#bf616a;"> -n</span><span> 0.3.3 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.3.3 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> boxes &quot;</span><span style="color:#a3be8c;">./hprof-slurp-boxes -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> box-struct &quot;</span><span style="color:#a3be8c;">./hprof-slurp -i pets.bin</span><span>&quot;
+</span></code></pre>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.3.3</code></td><td style="text-align: right">75.638 ± 4.154</td><td style="text-align: right">70.900</td><td style="text-align: right">78.660</td><td style="text-align: right">1.15 ± 0.06</td></tr>
+<tr><td style="text-align: left"><code>boxes</code></td><td style="text-align: right">68.621 ± 0.399</td><td style="text-align: right">68.194</td><td style="text-align: right">68.986</td><td style="text-align: right">1.04 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>box-struct</code></td><td style="text-align: right">65.978 ± 0.185</td><td style="text-align: right">65.764</td><td style="text-align: right">66.086</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>This last change gave us an extra 4%, which is quite nice.</p>
+<p>To go further, one would need to remove unnecessary fields from the <code>ClassDump</code> variant.</p>
+<h2 id="clippy">Clippy</h2>
+<p>Before wrapping up this article, it is mandatory to note that Clippy has a lint for this class of problems, which I, <strong>of course</strong> discovered only much later.</p>
+<p>It is called <a href="https://rust-lang.github.io/rust-clippy/master/index.html#large_enum_variant">large_enum_variant</a> and kicks in when the difference between the largest variant and the smallest variant is larger than 200 bytes.</p>
+<p>The documentation warns us about something very important that we discovered as well.</p>
+<blockquote>
+<p>This lint obviously cannot take the distribution of variants in your running program into account. It is possible that the smaller variants make up less than 1% of all instances, in which case the overhead is negligible and the boxing is counter-productive. Always measure the change this lint suggests.</p>
+</blockquote>
+<p>Let's give this lint a try by creating a <code>clippy.toml</code> file in the project and configuring this lint to be more aggressive with:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">enum-variant-size-threshold</span><span> = 100 </span><span style="color:#65737e;"># instead of the default value 200
+</span></code></pre>
+<p>Running <code>cargo clippy</code> yields two entries:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">warning:</span><span> large size difference between variants
+</span><span>  </span><span style="color:#bf616a;">--</span><span>&gt; src/parser/record.rs:97:5
+</span><span>   |
+</span><span style="color:#bf616a;">97 </span><span>|     </span><span style="color:#bf616a;">GcSegment</span><span>(GcRecord)</span><span style="color:#bf616a;">,
+</span><span>   |     </span><span style="color:#bf616a;">^^^^^^^^^^^^^^^^^^^</span><span> this variant is 128 bytes
+</span><span>   |
+</span><span style="color:#bf616a;">note:</span><span> and the second-largest variant is 58 bytes:
+</span><span>  </span><span style="color:#bf616a;">--</span><span>&gt; src/parser/record.rs:55:5
+</span><span>   |
+</span><span style="color:#bf616a;">55 </span><span>| </span><span style="color:#bf616a;">/</span><span>     AllocationSites {
+</span><span>56 | |         flags: u16,
+</span><span>57 | |         cutoff_ratio: u32,
+</span><span>58 | |         total_live_bytes: u32,
+</span><span>...  |
+</span><span>63 | |         allocation_sites: Vec&lt;AllocationSite&gt;,
+</span><span>64 | |     },
+</span><span>   | |</span><span style="color:#bf616a;">_____^
+</span><span>   = </span><span style="color:#bf616a;">help:</span><span> for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#large_enum_variant
+</span><span style="color:#bf616a;">help:</span><span> consider boxing the large fields to reduce the total size of the enum
+</span><span>   |
+</span><span style="color:#bf616a;">97 </span><span>|     </span><span style="color:#bf616a;">GcSegment</span><span>(Box&lt;GcRecord&gt;)</span><span style="color:#bf616a;">,
+</span><span>   |  
+</span></code></pre>
+<p>We tried this already and it did not work. Clippy tries its best, but remember, it cannot know about the distribution of variants through a static analysis.</p>
+<p>And the second entry:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">warning:</span><span> large size difference between variants
+</span><span>   </span><span style="color:#bf616a;">--</span><span>&gt; src/parser/gc_record.rs:127:5
+</span><span>    |
+</span><span style="color:#bf616a;">127 </span><span>| </span><span style="color:#bf616a;">/</span><span>     ClassDump {
+</span><span>128 | |         class_object_id: u64,
+</span><span>129 | |         stack_trace_serial_number: u32,
+</span><span>130 | |         super_class_object_id: u64,
+</span><span>...   |
+</span><span>138 | |         instance_fields: Vec&lt;FieldInfo&gt;,
+</span><span>139 | |     },
+</span><span>    | |</span><span style="color:#bf616a;">_____^</span><span> this variant is 122 bytes
+</span><span>    |
+</span><span>    = </span><span style="color:#bf616a;">note: </span><span>`</span><span style="color:#bf616a;">#[warn</span><span>(clippy::large_enum_variant)</span><span style="color:#bf616a;">]</span><span>` on by default
+</span><span style="color:#bf616a;">note:</span><span> and the second-largest variant is 49 bytes:
+</span><span>   </span><span style="color:#bf616a;">--</span><span>&gt; src/parser/gc_record.rs:120:5
+</span><span>    |
+</span><span style="color:#bf616a;">120 </span><span>| </span><span style="color:#bf616a;">/</span><span>     PrimitiveArrayDump {
+</span><span>121 | |         object_id: u64,
+</span><span>122 | |         stack_trace_serial_number: u32,
+</span><span>123 | |         number_of_elements: u32,
+</span><span>124 | |         element_type: FieldType,
+</span><span>125 | |         array_value: ArrayValue,
+</span><span>126 | |     },
+</span><span>    | |</span><span style="color:#bf616a;">_____^
+</span><span>    = </span><span style="color:#bf616a;">help:</span><span> for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#large_enum_variant
+</span><span style="color:#bf616a;">help:</span><span> consider boxing the large fields to reduce the total size of the enum
+</span><span>    |
+</span><span style="color:#bf616a;">138 </span><span>|         </span><span style="color:#bf616a;">instance_fields:</span><span> Box&lt;Vec&lt;FieldInfo&gt;&gt;,
+</span><span>    |                          </span><span style="color:#bf616a;">~~~~~~~~~~~~~~~~~~~
+</span></code></pre>
+<p>Which is the lead we ended up exploring as well.</p>
+<p>Sometimes the best way to learn is to rediscover what everyone already knows for yourself.</p>
+<p>Clippy is truly a fantastic tool and one of my personal favorites in the whole Rust ecosystem. Depending on your context, it may make sense to configure custom values for certain lints to get the most out of them.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>This article has presented a bottleneck due to excessive <code>memcopy</code> which was slowing down <code>hprof-slurp</code> prior to the 0.4.0 release.</p>
+<p>The final fix took only a few lines of code but had a <a href="https://github.com/agourlay/hprof-slurp/commit/73392f1210c09a86e5dbd59629b6ed0302a05dfc">strong</a> positive effect on performance.</p>
+<p>In order to get there, we had to understand a few details regarding the way Rust sizes types internally, more specifically, enumerations.</p>
+<p>As a rule of thumb, it is recommended to avoid single outsized variants when creating enumerations as it impacts the memory usage of all variants.</p>
+<p>One also must be careful when trying to reduce the stack memory pressure via boxing. Allocating on the heap is not magic, and its cost must be understood in the context of the application.</p>
+<p>The next article in this <a href="/categories/series/">series</a> will go through another interesting optimization encountered while making <code>hprof-slurp</code> faster.</p>
+<p><strong><em>Update: the article submission on <a href="https://www.reddit.com/r/rust/comments/w7pelk/a_performance_retrospective_using_rust_part_2/">reddit/r/rust</a> contains excellent comments.</em></strong></p>
+
+    </div>
+
+    
+    <div class="article-info">
+        
+        <div class="article-date">23 July 2022</div>
+        
+        <div class="article-taxonomies">
+            
+                <ul class="article-categories">
+                    
+                    <li><a href=" https://agourlay.github.io/categories/series/">series</a></li>
+                    
+                </ul>
+            
+            
+                <ul class="article-tags">
+                    
+                    <li><a href=" https://agourlay.github.io/tags/rust/">#Rust</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/performance/">#performance</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/hprof-slurp/">#hprof-slurp</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/memcopy/">#memcopy</a></li>
+                    
+                </ul>
+            
+        </div>
+    </div>
+
+</article>
+
+
+        </main>
+        <footer>
+            <p>
+                © Arnaud Gourlay&#x27;s blog 2025<br>
+                Powered by <a target="_blank" href="https://getzola.org/">Zola</a>, Theme <a target="_blank" href="https://github.com/zbrox/anpu-zola-theme">Anpu</a>.
+            </p>
+            <p>
+                
+                
+            </p>
+        </footer>
+    </div>
+
+    <div class="dark-mode-buttons">
+  <button class="dark-mode-button" id="dark-mode-on">
+    <img
+      src=" https://agourlay.github.io/dark_mode.svg"
+      width="24"
+      height="24"
+      alt="Dark mode"
+      aria-label="dark mode toggle"
+      title="Dark mode"
+    />
+  </button>
+  <button class="dark-mode-button" id="dark-mode-off">
+    <img
+      src=" https://agourlay.github.io/light_mode.svg "
+      width="24"
+      height="24"
+      alt="Light mode"
+      aria-label="light mode toggle"
+      title="Light mode"
+      style="filter: invert(1);"
+    />
+  </button>
+</div>
+<script>
+  const cls = document.body.classList;
+  const getSessionTheme = sessionStorage.getItem("theme");
+  if (getSessionTheme === "dark") {
+    cls.toggle("dark-mode", true);
+  } else if (getSessionTheme === "light") {
+    cls.toggle("dark-mode", false);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    cls.toggle("dark-mode", true);
+  }
+  document
+    .getElementById("dark-mode-on")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", true);
+      sessionStorage.setItem("theme", "dark");
+    });
+  document
+    .getElementById("dark-mode-off")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", false);
+      sessionStorage.setItem("theme", "light");
+    });
+</script>
+<noscript>
+  <style>
+    .dark-mode-buttons {
+      display: none;
+    }
+  </style>
+</noscript>
+
+    
+</body>
+</html>

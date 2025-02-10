@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+
+    <title>A performance retrospective using Rust (part 1)</title>
+    <meta name="description" content="Yet another programming blog">
+
+    <link rel="stylesheet" href=" https://agourlay.github.io/main.css">
+
+    
+        <link rel="alternate" type="application/atom+xml" title="RSS" href=" https://agourlay.github.io/atom.xml">
+    
+
+    
+    
+</head>
+<body>
+    <a class="skip-main" href="#main">Skip to content</a>
+    <div class="container">
+        <header> 
+            <h1 class="site-header">
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io">Arnaud Gourlay&#x27;s blog</a>
+            </h1>
+            <nav>
+                
+                
+                
+                <a  href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;">Tags</a>
+                
+                
+                <a  href="&#x2F;pages&#x2F;about">About</a>
+                
+                
+            </nav>
+        </header>
+        <main id="main" tabindex="-1">
+            
+
+<article class="post">
+    <header>
+        <h1>A performance retrospective using Rust (part 1)</h1>
+    </header>
+    <div class="content">
+        <p>This is the first article in a series regarding making a simple JVM heap dump analyzer in Rust faster over time.</p>
+<p>Although it is primarily targeted at intermediate Rust developers, it will surely be relevant for engineers interested in performance in general.</p>
+<p>Performance optimization is highly context-dependent so it makes sense to spend some time explaining what problem we are trying to solve.</p>
+<h2 id="context">Context</h2>
+<p>In a previous life, I found myself needing to analyze large JVM heap dumps. For a sense of scale, &quot;large&quot; stands for more than 50Gb in that context.</p>
+<p>The JVM ecosystem is pretty rich in terms of tooling regarding heap dump analysis. Most JVM developers are familiar with <a href="https://visualvm.github.io/">VisualVM</a> and <a href="https://www.eclipse.org/mat/">EclipseMat</a>.</p>
+<p>Those tools are truly excellent; they offer a large panel of <a href="https://eclipsesource.com/blogs/2013/01/21/10-tips-for-using-the-eclipse-memory-analyzer/">features</a> to drill down on the content of heap dumps to help you pin point your issue very precisely.</p>
+<p>However, they tend to be extremely memory hungry and slow when analyzing large files, which is forcing users to spin up expensive beefy instance from a cloud provider to get the job done.</p>
+<p>The tool I needed was fairly specific, my main concern was to get a quick overview of large heap dumps using a regular developer machine to decide if it actually makes sense to investigate further using the aforementioned workflow.</p>
+<p>The goal is not to replace the existing tooling but to optimize the investigation workflow and this led me to create the <a href="https://github.com/agourlay/hprof-slurp">hprof-slurp</a> project.</p>
+<h2 id="hprof-slurp">Hprof-slurp</h2>
+<p>The project is a CLI written in Rust which processes dump files in a streaming fashion.</p>
+<p>It trades off features for speed by performing only a single pass without storing intermediary results on the host, which reduces the depth of the analysis possible.</p>
+<p>The project is named after the <a href="https://docs.oracle.com/javase/8/docs/technotes/samples/hprof.html">hprof</a> format which is used by the JDK to encode heap dumps.</p>
+<p>The 3 main features available are:</p>
+<ul>
+<li>report top <code>k</code> allocated classes.</li>
+<li>report the count of instances per class.</li>
+<li>report the largest instance size per class.</li>
+</ul>
+<p>Let's have a look at an example of output processing: a <a href="https://github.com/agourlay/hprof-slurp/tree/master/test-heap-dumps">tiny heap dump</a> which is used as part of the integration test pipeline.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">du -BM</span><span> hprof-64.bin 
+</span><span style="color:#bf616a;">2M</span><span> hprof-64.bin
+</span></code></pre>
+<p>Let's process that 2Mb heap dump!</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">./hprof-slurp -i </span><span>&quot;</span><span style="color:#a3be8c;">hprof-64.bin</span><span>&quot;
+</span></code></pre>
+<p>Which instaneously yields those two tables</p>
+<pre data-lang="textile" style="background-color:#2b303b;color:#c0c5ce;" class="language-textile "><code class="language-textile" data-lang="textile"><span>Top 20 allocated classes:
+</span><span>
+</span><span>Total size | Instances |     Largest | Class name                                  
+</span><span style="color:#bf616a;">------------------------------------------------------------------------------------
+</span><span>   1.99MiB |       436 |   634.78KiB | int[]
+</span><span> 197.11KiB |      1991 |    16.02KiB | char[]
+</span><span>  85.25KiB |       443 |     8.02KiB | byte[]
+</span><span>  47.38KiB |      1516 |  32.00bytes | java/lang/String
+</span><span>  45.42KiB |       560 |     8.02KiB | java/lang/Object[]
+</span><span>  15.26KiB |       126 | 124.00bytes | java/lang/reflect/Field
+</span><span>  14.77KiB |       378 |  40.00bytes | java/util/LinkedList$Node
+</span><span>   9.94KiB |       212 |  48.00bytes | java/util/HashMap$Node
+</span><span>   8.91KiB |       190 |  48.00bytes | java/util/LinkedList
+</span><span>   8.42KiB |        98 |  88.00bytes | java/lang/ref/SoftReference
+</span><span>   6.05KiB |       258 |  24.00bytes | java/lang/Integer
+</span><span>   5.91KiB |        18 |     2.02KiB | java/util/HashMap$Node[]
+</span><span>   5.86KiB |       150 |  40.00bytes | java/lang/StringBuilder
+</span><span>   5.44KiB |       116 |  48.00bytes | java/util/Hashtable$Entry
+</span><span>   5.05KiB |        38 | 136.00bytes | sun/util/locale/LocaleObjectCache$CacheEntry
+</span><span>   5.00KiB |        40 | 128.00bytes | java/lang/ref/Finalizer
+</span><span>   3.50KiB |        32 | 112.00bytes | java/net/URL
+</span><span>   3.42KiB |        73 |  48.00bytes | java/io/File
+</span><span>   3.17KiB |        12 | 776.00bytes | java/util/Hashtable$Entry[]
+</span><span>   3.13KiB |        56 | 144.00bytes | java/lang/String[]
+</span><span>
+</span><span>Top 20 largest instances:
+</span><span>
+</span><span> Total size | Instances |     Largest | Class name                                   
+</span><span style="color:#bf616a;">------------------------------------------------------------------------------------</span><span>--
+</span><span>    1.99MiB |       436 |   634.78KiB | int[]
+</span><span>  197.11KiB |      1991 |    16.02KiB | char[]
+</span><span>   85.25KiB |       443 |     8.02KiB | byte[]
+</span><span>   45.42KiB |       560 |     8.02KiB | java/lang/Object[]
+</span><span>    5.91KiB |        18 |     2.02KiB | java/util/HashMap$Node[]
+</span><span>    2.05KiB |         2 |     2.02KiB | java/lang/invoke/MethodHandle[]
+</span><span>    2.02KiB |         1 |     2.02KiB | java/lang/Integer[]
+</span><span>    3.17KiB |        12 | 776.00bytes | java/util/Hashtable$Entry[]
+</span><span>462.00bytes |         1 | 462.00bytes | sun/misc/Launcher$AppClassLoader
+</span><span>454.00bytes |         1 | 454.00bytes | sun/misc/Launcher$ExtClassLoader
+</span><span>680.00bytes |         2 | 340.00bytes | simple/Producer
+</span><span>680.00bytes |         2 | 340.00bytes | simple/Consumer
+</span><span>    2.30KiB |         7 | 336.00bytes | java/util/jar/JarFile$JarFileEntry
+</span><span>334.00bytes |         1 | 334.00bytes | java/lang/ref/Finalizer$FinalizerThread
+</span><span>332.00bytes |         1 | 332.00bytes | java/lang/ref/Reference$ReferenceHandler
+</span><span>    1.01KiB |         9 | 312.00bytes | java/lang/reflect/Field[]
+</span><span>    1.48KiB |         7 | 272.00bytes | java/util/concurrent/ConcurrentHashMap$Node[]
+</span><span>236.00bytes |         1 | 236.00bytes | sun/net/www/protocol/file/FileURLConnection
+</span><span>440.00bytes |         2 | 220.00bytes | java/io/ExpiringCache$1
+</span><span>432.00bytes |         2 | 216.00bytes | java/lang/NoSuchMethodError
+</span></code></pre>
+<p>And that's all there is to it.</p>
+<h2 id="architecture">Architecture</h2>
+<p>As mentioned previously, the CLI is written in Rust and works in a synchronous multithreaded fashion.</p>
+<p>Here is a simplified architecture diagram for the current version (0.4.7).</p>
+<p><img src="/2022-07-11/architecture.png" alt="Architecture" /></p>
+<p>The various threads are wired up together via channels to form a processing pipeline where all stages run in parallel (if the host has enough cores).</p>
+<p>The file reader thread pro-actively loads chunks of 64Mb from the input file to not starve the rest of the pipeline while waiting for IO. Loading too many chunks in advance has a direct impact on the memory usage, so I settled on 3 chunks based on experiments.</p>
+<p>Those chunks are then sent over to the streaming parser which was the most challenging work of the project because it must handle incomplete inputs.
+A single chunk can contain millions of records, and a chunk is of course not aligned on the actual boundary of the <code>hprof</code> records.</p>
+<p>Therefore, the parser tries to make sense of the incoming binary data while carefully managing its inner buffer.</p>
+<p>More concretely, it has been written by following the <a href="https://hg.openjdk.java.net/jdk/jdk/file/ee1d592a9f53/src/hotspot/share/services/heapDumper.cpp#l62">full specification of the hprof format</a> found in the heap dumper code of the JDK.</p>
+<p>The parser itself is written with the <a href="https://github.com/Geal/nom">nom</a> library, which I found a real pleasure to work with due to its support for parsing incomplete data.</p>
+<p>As the content of the file is streamed through the parser, the classes information is extracted and forwarded to the statistics recorder thread which keeps track of the instance counts in order to later compute the heavy hitters.</p>
+<p>Spoiler alert: as of version 0.4.7, the performance bottleneck is the parsing thread.</p>
+<p>Speeding up other stages of the pipelines would not yield any performance improvements.</p>
+<h2 id="test-data">Test data</h2>
+<p>We are about to do some performance testing, which means we need some meaningful test data.</p>
+<p>For the sake of transparency or reproducibility, I will show you exactly how to generate a similar heap dump.</p>
+<p>To avoid completely synthetic data, we will be using <a href="https://github.com/spring-petclinic/spring-petclinic-rest">Spring's REST petclinic</a>.</p>
+<p>It is a reasonable choice because it is relatively well known and it uses an in-memory database by default which naturally amplifies the memory usage.</p>
+<p>In order to not waste too much time growing the heap, we will simply use the Java <a href="https://blogs.oracle.com/javamagazine/post/epsilon-the-jdks-do-nothing-garbage-collector">Epsilon GC</a> which does not cleanup anything.</p>
+<p>This is the change to apply if you want to try this at home.</p>
+<pre data-lang="diff" style="background-color:#2b303b;color:#c0c5ce;" class="language-diff "><code class="language-diff" data-lang="diff"><span>git diff
+</span><span>diff --git a/pom.xml b/pom.xml
+</span><span>index b936a37..7621eb9 100644
+</span><span>--- a/pom.xml
+</span><span>+++ b/pom.xml
+</span><span>@@ -165,6 +165,15 @@
+</span><span>             &lt;plugin&gt;
+</span><span>                 &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+</span><span>                 &lt;artifactId&gt;spring-boot-maven-plugin&lt;/artifactId&gt;
+</span><span style="color:#a3be8c;">+                &lt;configuration&gt;
+</span><span style="color:#a3be8c;">+                    &lt;executable&gt;true&lt;/executable&gt;
+</span><span style="color:#a3be8c;">+                    &lt;jvmArguments&gt;
+</span><span style="color:#a3be8c;">+                        -Xmx32g
+</span><span style="color:#a3be8c;">+                        -XX:+UnlockExperimentalVMOptions
+</span><span style="color:#a3be8c;">+                        -XX:+UseEpsilonGC
+</span><span style="color:#a3be8c;">+                    &lt;/jvmArguments&gt;
+</span><span style="color:#a3be8c;">+                &lt;/configuration&gt;
+</span><span>                 &lt;executions&gt;
+</span><span>                     &lt;execution&gt;
+</span><span>
+</span></code></pre>
+<p>You could also add <code>-XX:+HeapDumpOnOutOfMemoryError</code> if you prefer to produce a heap dump whenever an <code>OutOfMemory Error</code> is thrown instead of performing the dump manually.</p>
+<p>In any case we can start the application using Maven.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">./mvnw</span><span> spring-boot:run
+</span></code></pre>
+<p>In order to increase the memory pressure, we will gently hammer one of the REST endpoints using <a href="https://github.com/rakyll/hey">Hey</a>.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hey -m</span><span> POST \
+</span><span style="color:#bf616a;"> -D</span><span> ./payload-owner.json \
+</span><span style="color:#bf616a;"> -T</span><span> application/json \
+</span><span style="color:#bf616a;"> -A</span><span> application/json \
+</span><span style="color:#bf616a;"> -z</span><span> 3m \
+</span><span style="color:#bf616a;"> -c</span><span> 50 \
+</span><span> http://127.0.0.1:9966/petclinic/api/owners
+</span></code></pre>
+<p>With the following <code>payload-owner.json</code></p>
+<pre data-lang="json" style="background-color:#2b303b;color:#c0c5ce;" class="language-json "><code class="language-json" data-lang="json"><span>{
+</span><span>  &quot;</span><span style="color:#a3be8c;">address</span><span>&quot;: &quot;</span><span style="color:#a3be8c;">110 W. Liberty St.</span><span>&quot;,
+</span><span>  &quot;</span><span style="color:#a3be8c;">city</span><span>&quot;: &quot;</span><span style="color:#a3be8c;">Madison</span><span>&quot;,
+</span><span>  &quot;</span><span style="color:#a3be8c;">firstName</span><span>&quot;: &quot;</span><span style="color:#a3be8c;">George</span><span>&quot;,
+</span><span>  &quot;</span><span style="color:#a3be8c;">lastName</span><span>&quot;: &quot;</span><span style="color:#a3be8c;">Franklin</span><span>&quot;,
+</span><span>  &quot;</span><span style="color:#a3be8c;">telephone</span><span>&quot;: &quot;</span><span style="color:#a3be8c;">6085551023</span><span>&quot;
+</span><span>}
+</span></code></pre>
+<p>Once the desired heap size is reached, we can generate a heap dump with <code>jmap</code>.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">jmap -dump</span><span>:format=b,file=pets.bin &lt;pid&gt;
+</span></code></pre>
+<p>Which gives us a decent 34Gb heap dump file to play with.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">du -BM</span><span> pets.bin
+</span><span style="color:#bf616a;">34486M</span><span> pets.bin
+</span></code></pre>
+<p>Let's see what <code>hprof-slurp</code> has to say about it.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">./hprof-slurp -i </span><span>&quot;</span><span style="color:#a3be8c;">pets.bin</span><span>&quot;
+</span></code></pre>
+<pre data-lang="textile" style="background-color:#2b303b;color:#c0c5ce;" class="language-textile "><code class="language-textile" data-lang="textile"><span>Top 20 allocated classes:
+</span><span>
+</span><span>Total size | Instances |     Largest | Class name                                                                                 
+</span><span style="color:#bf616a;">-----------------------------------------------------------------------------------------------------------------------------------
+</span><span>   4.02GiB |  90184199 |   544.20KiB | byte[]
+</span><span>   2.13GiB |  55748013 |   109.80KiB | java/lang/Object[]
+</span><span>   1.72GiB |  51264762 |  36.00bytes | java/lang/String
+</span><span>   1.57GiB |  14807226 | 114.00bytes | org/hibernate/validator/internal/engine/path/NodeImpl
+</span><span>   1.18GiB |   8536353 | 148.00bytes | java/nio/HeapByteBuffer
+</span><span>   1.03GiB |  18074217 |     3.75MiB | int[]
+</span><span>1022.73MiB |   5765654 | 186.00bytes | java/lang/reflect/Method
+</span><span>1021.18MiB |  26769597 |  40.00bytes | java/util/ArrayList
+</span><span> 896.73MiB |  21370207 |  44.00bytes | java/lang/StringBuilder
+</span><span> 838.65MiB |   7594346 |    16.02KiB | java/util/HashMap$Node[]
+</span><span> 744.79MiB |   5276798 | 148.00bytes | java/nio/StringCharBuffer
+</span><span> 743.57MiB |   5340350 | 146.00bytes | java/util/LinkedHashMap
+</span><span> 631.70MiB |   6899814 |  96.00bytes | java/util/regex/Matcher
+</span><span> 606.64MiB |   6490868 |  98.00bytes | org/hibernate/validator/internal/engine/constraintvalidation/ConstraintValidatorContextImpl
+</span><span> 605.70MiB |    610435 |   128.02KiB | java/util/concurrent/ConcurrentHashMap$Node[]
+</span><span> 584.97MiB |  14604425 |  42.00bytes | org/hibernate/validator/internal/engine/path/PathImpl
+</span><span> 556.55MiB |  14589693 |  40.00bytes | java/util/ArrayList$Itr
+</span><span> 520.24MiB |   6818920 |  80.00bytes | java/util/HashMap
+</span><span> 425.14MiB |   8330358 |    32.02KiB | char[]
+</span><span> 424.89MiB |   9281863 |  48.00bytes | java/util/HashMap$Node
+</span><span>
+</span><span>Top 20 largest instances:
+</span><span>
+</span><span>Total size | Instances |   Largest | Class name                                                        
+</span><span style="color:#bf616a;">--------------------------------------------------------------------------------------------------------
+</span><span>   1.03GiB |  18074217 |   3.75MiB | int[]
+</span><span>   4.02GiB |  90184199 | 544.20KiB | byte[]
+</span><span> 605.70MiB |    610435 | 128.02KiB | java/util/concurrent/ConcurrentHashMap$Node[]
+</span><span>   2.13GiB |  55748013 | 109.80KiB | java/lang/Object[]
+</span><span> 425.14MiB |   8330358 |  32.02KiB | char[]
+</span><span>  13.70MiB |    211087 |  24.02KiB | long[]
+</span><span>   5.81MiB |      3456 |  16.07KiB | jdk/internal/org/objectweb/asm/SymbolTable$Entry[]
+</span><span> 314.02KiB |       159 |  16.07KiB | org/springframework/asm/SymbolTable$Entry[]
+</span><span> 838.65MiB |   7594346 |  16.02KiB | java/util/HashMap$Node[]
+</span><span>  81.18MiB |   2093066 |   9.05KiB | java/lang/String[]
+</span><span> 432.84KiB |        54 |   8.02KiB | java/nio/ByteBuffer[]
+</span><span>  15.83KiB |         2 |   7.91KiB | java/util/Locale[]
+</span><span>  13.94MiB |    405627 |   4.67KiB | java/lang/Object[]
+</span><span>  30.21KiB |        12 |   4.02KiB | net/bytebuddy/jar/asm/SymbolTable$Entry[]
+</span><span>  47.46MiB |    214730 |   3.01KiB | java/lang/reflect/Method[]
+</span><span>   4.23KiB |         6 |   2.97KiB | [[B[]
+</span><span>   2.84KiB |         1 |   2.84KiB | java/lang/Character$UnicodeBlock[]
+</span><span>   2.67KiB |         1 |   2.67KiB | jdk/internal/math/FDBigInteger[]
+</span><span>   4.28KiB |         2 |   2.14KiB | sun/security/util/KnownOIDs[]
+</span><span>   2.11KiB |         1 |   2.11KiB | org/springframework/boot/web/embedded/tomcat/TomcatEmbeddedContext
+</span></code></pre>
+<p>This output looks about right for an application using an in-memory database. We find the usual suspects regarding various arrays, HashMap nodes and Strings.</p>
+<h2 id="performance-over-time">Performance over time</h2>
+<p>It is often interesting to track the performance of a piece of software over time to be able to attribute gains to precise changes.</p>
+<p>Sometimes a single line change can have a tremendous effect, and sometimes a complete change of architecture is required to remove a bottleneck.</p>
+<p>Using the benchmarking tool <a href="https://github.com/sharkdp/hyperfine">hyperfine</a> we are able to measure accurately the execution time of our CLI in a blackbox fashion.</p>
+<p>For reference, I will be running the benchmarks on a laptop running Linux on an Intel <a href="https://www.intel.com/content/www/us/en/products/sku/201896/intel-core-i710610u-processor-8m-cache-up-to-4-90-ghz/specifications.html">i7-10610U</a> CPU.</p>
+<p>In this comparison analysis, we are interested in the relative speedup between releases and not the absolute durations, which are mostly a function of the dump size given a stable thoughtput.</p>
+<p>After downloading all the versions of <code>hprof-slurp</code> into the same directory, we can compare how they handle the <code>pets.bin</code> heap dump using the following <code>hyperfine</code> magic incantation.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">hyperfine --runs</span><span> 3 \
+</span><span style="color:#bf616a;"> --export-markdown</span><span> hprof.md \
+</span><span style="color:#bf616a;"> --export-json</span><span> hprof.json \
+</span><span style="color:#bf616a;"> -n</span><span> 0.1.0 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.1.0 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.2.0 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.2.0 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.2.1 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.2.1 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.2.2 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.2.2 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.3.0 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.3.0 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.3.1 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.3.1 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.3.2 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.3.2 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.3.3 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.3.3 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.4.0 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.4.0 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.4.1 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.4.1 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.4.2 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.4.2 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.4.3 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.4.3 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.4.4 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.4.4 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.4.5 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.4.5 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.4.6 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.4.6 -i pets.bin</span><span>&quot; \
+</span><span style="color:#bf616a;"> -n</span><span> 0.4.7 &quot;</span><span style="color:#a3be8c;">./hprof-slurp-0.4.7 -i pets.bin</span><span>&quot;
+</span></code></pre>
+<p>Which - after a long time - yields the following markdown table in <code>hprof.md</code>.</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.1.0</code></td><td style="text-align: right">131.227 ± 4.072</td><td style="text-align: right">126.660</td><td style="text-align: right">134.475</td><td style="text-align: right">3.83 ± 0.12</td></tr>
+<tr><td style="text-align: left"><code>0.2.0</code></td><td style="text-align: right">119.450 ± 0.244</td><td style="text-align: right">119.206</td><td style="text-align: right">119.694</td><td style="text-align: right">3.49 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>0.2.1</code></td><td style="text-align: right">119.038 ± 0.513</td><td style="text-align: right">118.452</td><td style="text-align: right">119.405</td><td style="text-align: right">3.47 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>0.2.2</code></td><td style="text-align: right">92.710 ± 0.893</td><td style="text-align: right">91.685</td><td style="text-align: right">93.324</td><td style="text-align: right">2.71 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>0.3.0</code></td><td style="text-align: right">84.097 ± 0.159</td><td style="text-align: right">83.953</td><td style="text-align: right">84.268</td><td style="text-align: right">2.45 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.3.1</code></td><td style="text-align: right">81.579 ± 0.073</td><td style="text-align: right">81.497</td><td style="text-align: right">81.639</td><td style="text-align: right">2.38 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.3.2</code></td><td style="text-align: right">81.255 ± 0.211</td><td style="text-align: right">81.028</td><td style="text-align: right">81.445</td><td style="text-align: right">2.37 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.3.3</code></td><td style="text-align: right">77.121 ± 0.228</td><td style="text-align: right">76.937</td><td style="text-align: right">77.376</td><td style="text-align: right">2.25 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.4.0</code></td><td style="text-align: right">67.911 ± 0.979</td><td style="text-align: right">66.826</td><td style="text-align: right">68.728</td><td style="text-align: right">1.98 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>0.4.1</code></td><td style="text-align: right">65.925 ± 0.344</td><td style="text-align: right">65.645</td><td style="text-align: right">66.309</td><td style="text-align: right">1.92 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.4.2</code></td><td style="text-align: right">65.779 ± 0.240</td><td style="text-align: right">65.602</td><td style="text-align: right">66.053</td><td style="text-align: right">1.92 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.4.3</code></td><td style="text-align: right">63.398 ± 0.104</td><td style="text-align: right">63.291</td><td style="text-align: right">63.499</td><td style="text-align: right">1.85 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.4.4</code></td><td style="text-align: right">35.473 ± 0.047</td><td style="text-align: right">35.444</td><td style="text-align: right">35.527</td><td style="text-align: right">1.04 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.4.5</code></td><td style="text-align: right">34.695 ± 0.302</td><td style="text-align: right">34.440</td><td style="text-align: right">35.028</td><td style="text-align: right">1.01 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.4.6</code></td><td style="text-align: right">34.285 ± 0.048</td><td style="text-align: right">34.254</td><td style="text-align: right">34.340</td><td style="text-align: right">1.00 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.4.7</code></td><td style="text-align: right">34.264 ± 0.289</td><td style="text-align: right">34.000</td><td style="text-align: right">34.574</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>And using the <code>hprof.json</code> file and some python <a href="https://github.com/sharkdp/hyperfine/tree/master/scripts">scripts</a> we generate the following whisker graph.</p>
+<p><img src="/2022-07-11/hprof-graph.png" alt="Whisker graph" /></p>
+<p>Some observations:</p>
+<ul>
+<li>the throughput increased by more than 70%</li>
+<li>0.1.0 has a large variance (might be a warmup issue)</li>
+<li>starting from 0.4.5 the iterative improvement is minimal</li>
+</ul>
+<p>In any case, we reached a solid 1Gb/s throughput in the latest version given the size of our test file.</p>
+<p>Let's have a look at the peak memory consumption for 0.4.7 using <a href="https://github.com/KDE/heaptrack">Heaptrack</a>.</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">heaptrack</span><span> ./hprof-slurp-0.4.7</span><span style="color:#bf616a;"> -i</span><span> pets.bin
+</span></code></pre>
+<p>This opens up the UI directly after the run if it is installed.</p>
+<p><img src="/2022-07-11/latest-heaptrack-consumed.png" alt="Heaptrack memory consumed" /></p>
+<p>The memory usage is pretty stable; it seems we have been able to stream the whole 34 Gb file within 500Mb.</p>
+<p>Most of it is actually due to the various internal buffers which are used to communicate between the threads.
+Those are pre-allocated and can grow to a certain size before being shrunk to release the memory.</p>
+<p>One could expect a stable similar memory usage for much larger dumps unless those contain large arrays of primitives or objects which need to be parsed.</p>
+<h2 id="future-work">Future work</h2>
+<p>Obviously, I am still interested in making <code>hprof-slurp</code> faster — hopefully not at the expense of code readability.</p>
+<p>Outside of the performance concern, I believe the output could still be improved to be more useful.</p>
+<p>First, I would like to validate the precision of the statistics reported by comparing the output of <code>hprof-slurp</code> against the existing tools. My gut feeling is that the numbers are not too far off and serve as a pretty good proxy.</p>
+<p>Moreover, additional extractions could be performed as long as it happens in a single pass, such as rendering the complete thread stack traces at the moment of the heap dump.</p>
+<p>Feel free to <a href="/pages/about">reach out</a> if you have suggestions.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>This article has shown that <a href="https://github.com/agourlay/hprof-slurp">hprof-slurp</a> has gotten faster over time and that it is now processing heap dumps at around 1Gb/s.</p>
+<p>It fulfills the initial goal, which was to offer a quick overview of large heap dumps using a regular developer machine.</p>
+<p>The next articles in this <a href="/categories/series/">series</a> will go through a selection of the most interesting optimizations that had the largest impact on performance.</p>
+<p>In the meantime, you can try to reproduce those results or, even better, analyze larger real-world heap dumps!</p>
+
+    </div>
+
+    
+    <div class="article-info">
+        
+        <div class="article-date">11 July 2022</div>
+        
+        <div class="article-taxonomies">
+            
+                <ul class="article-categories">
+                    
+                    <li><a href=" https://agourlay.github.io/categories/series/">series</a></li>
+                    
+                </ul>
+            
+            
+                <ul class="article-tags">
+                    
+                    <li><a href=" https://agourlay.github.io/tags/rust/">#Rust</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/performance/">#performance</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/hprof-slurp/">#hprof-slurp</a></li>
+                    
+                    <li><a href=" https://agourlay.github.io/tags/benchmarking/">#benchmarking</a></li>
+                    
+                </ul>
+            
+        </div>
+    </div>
+
+</article>
+
+
+        </main>
+        <footer>
+            <p>
+                © Arnaud Gourlay&#x27;s blog 2025<br>
+                Powered by <a target="_blank" href="https://getzola.org/">Zola</a>, Theme <a target="_blank" href="https://github.com/zbrox/anpu-zola-theme">Anpu</a>.
+            </p>
+            <p>
+                
+                
+            </p>
+        </footer>
+    </div>
+
+    <div class="dark-mode-buttons">
+  <button class="dark-mode-button" id="dark-mode-on">
+    <img
+      src=" https://agourlay.github.io/dark_mode.svg"
+      width="24"
+      height="24"
+      alt="Dark mode"
+      aria-label="dark mode toggle"
+      title="Dark mode"
+    />
+  </button>
+  <button class="dark-mode-button" id="dark-mode-off">
+    <img
+      src=" https://agourlay.github.io/light_mode.svg "
+      width="24"
+      height="24"
+      alt="Light mode"
+      aria-label="light mode toggle"
+      title="Light mode"
+      style="filter: invert(1);"
+    />
+  </button>
+</div>
+<script>
+  const cls = document.body.classList;
+  const getSessionTheme = sessionStorage.getItem("theme");
+  if (getSessionTheme === "dark") {
+    cls.toggle("dark-mode", true);
+  } else if (getSessionTheme === "light") {
+    cls.toggle("dark-mode", false);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    cls.toggle("dark-mode", true);
+  }
+  document
+    .getElementById("dark-mode-on")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", true);
+      sessionStorage.setItem("theme", "dark");
+    });
+  document
+    .getElementById("dark-mode-off")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", false);
+      sessionStorage.setItem("theme", "light");
+    });
+</script>
+<noscript>
+  <style>
+    .dark-mode-buttons {
+      display: none;
+    }
+  </style>
+</noscript>
+
+    
+</body>
+</html>

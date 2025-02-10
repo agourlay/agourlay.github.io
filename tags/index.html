@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+
+    <title>Tags</title>
+    <meta name="description" content="Yet another programming blog">
+
+    <link rel="stylesheet" href=" https://agourlay.github.io/main.css">
+
+    
+        <link rel="alternate" type="application/atom+xml" title="RSS" href=" https://agourlay.github.io/atom.xml">
+    
+
+    
+    
+</head>
+<body>
+    <a class="skip-main" href="#main">Skip to content</a>
+    <div class="container">
+        <header> 
+            <h1 class="site-header">
+                <a href=" https:&#x2F;&#x2F;agourlay.github.io">Arnaud Gourlay&#x27;s blog</a>
+            </h1>
+            <nav>
+                
+                
+                
+                <a class="active" href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;">Tags</a>
+                
+                
+                <a  href="&#x2F;pages&#x2F;about">About</a>
+                
+                
+            </nav>
+        </header>
+        <main id="main" tabindex="-1">
+            
+<h1>Tags</h1>
+
+<ul class="terms">
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;benchmarking&#x2F;">
+        #benchmarking
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;hprof-slurp&#x2F;">
+        #hprof-slurp
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;memcopy&#x2F;">
+        #memcopy
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;multithreading&#x2F;">
+        #multithreading
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;music&#x2F;">
+        #music
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;performance&#x2F;">
+        #performance
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;qdrant&#x2F;">
+        #Qdrant
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;release&#x2F;">
+        #release
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;rust&#x2F;">
+        #Rust
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;ruxguitar&#x2F;">
+        #ruxguitar
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;security&#x2F;">
+        #security
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;storage&#x2F;">
+        #storage
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;talk&#x2F;">
+        #talk
+        </a>
+    </li>
+    
+    <li>
+        <a href=" https:&#x2F;&#x2F;agourlay.github.io&#x2F;tags&#x2F;try-trait&#x2F;">
+        #try_trait
+        </a>
+    </li>
+    
+</ul>
+
+        </main>
+        <footer>
+            <p>
+                © Arnaud Gourlay&#x27;s blog 2025<br>
+                Powered by <a target="_blank" href="https://getzola.org/">Zola</a>, Theme <a target="_blank" href="https://github.com/zbrox/anpu-zola-theme">Anpu</a>.
+            </p>
+            <p>
+                
+                
+            </p>
+        </footer>
+    </div>
+
+    <div class="dark-mode-buttons">
+  <button class="dark-mode-button" id="dark-mode-on">
+    <img
+      src=" https://agourlay.github.io/dark_mode.svg"
+      width="24"
+      height="24"
+      alt="Dark mode"
+      aria-label="dark mode toggle"
+      title="Dark mode"
+    />
+  </button>
+  <button class="dark-mode-button" id="dark-mode-off">
+    <img
+      src=" https://agourlay.github.io/light_mode.svg "
+      width="24"
+      height="24"
+      alt="Light mode"
+      aria-label="light mode toggle"
+      title="Light mode"
+      style="filter: invert(1);"
+    />
+  </button>
+</div>
+<script>
+  const cls = document.body.classList;
+  const getSessionTheme = sessionStorage.getItem("theme");
+  if (getSessionTheme === "dark") {
+    cls.toggle("dark-mode", true);
+  } else if (getSessionTheme === "light") {
+    cls.toggle("dark-mode", false);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    cls.toggle("dark-mode", true);
+  }
+  document
+    .getElementById("dark-mode-on")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", true);
+      sessionStorage.setItem("theme", "dark");
+    });
+  document
+    .getElementById("dark-mode-off")
+    .addEventListener("click", function (e) {
+      cls.toggle("dark-mode", false);
+      sessionStorage.setItem("theme", "light");
+    });
+</script>
+<noscript>
+  <style>
+    .dark-mode-buttons {
+      display: none;
+    }
+  </style>
+</noscript>
+
+    
+</body>
+</html>
