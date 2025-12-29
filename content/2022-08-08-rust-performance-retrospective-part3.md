@@ -139,7 +139,7 @@ Most of it now comes from `nom::combinator::flat_map` and when zooming in we can
 
 ![Flamegraph after fix zoom](/2022-08-08/flamegraph-after-fix-extra.png)
 
-The previous occurence of `core::ops::try_trait::Try>::branch` has been replaced by `Result::map` which informs us that our second change is executed more often.
+The previous occurrence of `core::ops::try_trait::Try>::branch` has been replaced by `Result::map` which informs us that our second change is executed more often.
 
 Observing flamegraphs is nice but does it translate into runtime performance gains?
 

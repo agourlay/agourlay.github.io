@@ -30,7 +30,7 @@ The first part is about generating candidate passwords. This could be done by ei
 
 The second part is then responsible for testing those candidates against the archive, one by one until the password is found or no more candidates are available.
 
-Testing millions of passwords using a brute force strategy sounds like something that is CPU bound. Therefore we should structure our program so that the second part can scale nicely with the number of cores on the host machine.
+Testing millions of passwords using a brute force strategy sounds like something that is CPU bound. Therefore, we should structure our program so that the second part can scale nicely with the number of cores on the host machine.
 
 A common approach for this type of problem is to use a set of workers to process tasks from a shared queue.
 
@@ -46,7 +46,7 @@ There are several flavors of channels. In our case, we need to support a single 
 
 In order to keep the scope small for the beginning, we will start by retrieving passwords from an existing dictionary file.
 
-The following file [Passwords/xato-net-10-million-passwords.txt](https://github.com/danielmiessler/SecLists/blob/master/Passwords/xato-net-10-million-passwords.txt) found on Github looks like a perfect candidate.
+The following file [Passwords/xato-net-10-million-passwords.txt](https://github.com/danielmiessler/SecLists/blob/master/Passwords/xato-net-10-million-passwords.txt) found on GitHub looks like a perfect candidate.
 
 Let's fetch it and have a peek at its content:
 
@@ -88,7 +88,7 @@ Our program will have a thread reading the content of the password dictionary an
 
 There will be millions of password candidates. We need something very fast.
 
-We will use the [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) crate for our channels because they are far superior to the channels avalaible in `std:: sync:: mpsc` in every way.
+We will use the [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) crate for our channels because they are far superior to the channels available in `std:: sync:: mpsc` in every way.
 
 Those better channels might even make it to the standard library in the [future](https://github.com/rust-lang/rust/pull/93563).
 
@@ -190,7 +190,7 @@ The Rustdoc for `by_index_decrypt` actually warns about it.
 > There are many passwords out there that will also pass the validity checks we are able to perform.
 > This is a weakness of the ZipCrypto algorithm, due to its fairly primitive approach to cryptography.
 
-We can workaround those collisions by performing a full read of the archive with the password to make sure it is actually correct.
+We can work around those collisions by performing a full read of the archive with the password to make sure it is actually correct.
 
 ```diff
  use crossbeam_channel::{Receiver, Sender};
@@ -377,7 +377,7 @@ First, let's have worker threads communicate the password to the main thread ins
 
 This design is much better and will enable unit testing later on!
 
-As a follow up, once the main thread receives the password, it will notify all threads to stop using a thread-safe signal.
+As a follow-up, once the main thread receives the password, it will notify all threads to stop using a thread-safe signal.
 
 ```diff
  use std::path::{Path, PathBuf};
@@ -542,9 +542,9 @@ Using channels can make our threads block forever if the channel is not disconne
 
 This makes the task more difficult given that signals are efficient only if the threads are able to run their inner loop.
 
-Given that we are using a bounded channel, it makes sense to shutdown the producer first.
+Given that we are using a bounded channel, it makes sense to shut down the producer first.
 
-In addition, it is important to manually drop `send_found_password` to shutdown properly when no password is found:
+In addition, it is important to manually drop `send_found_password` to shut down properly when no password is found:
 
 1. The password generator thread exits at the end of the dictionary.
 2. All workers exit when the channel is disconnected.
@@ -564,7 +564,7 @@ Finding a correct sequence can be a bit subtle, so it is better to test it.
 
 An alternative solution would be to use the timeout-flavored API `recv_timeout` and `send_timeout` which enable you to block only for a specific duration.
 
-I have decided to not use those as they are not strictly required and it forces us to better understand our shutdown sequence :)
+I have decided to not use those as they are not strictly required, and it forces us to better understand our shutdown sequence :)
 
 Let's give it a try!
 
@@ -642,7 +642,7 @@ The progress bar needs to be configured according to our use case.
 The most important points are:
 
 - We set up a template to display some useful information regarding processing speed and ETA.
-- The progress bar refresh rate is fixed to avoid flickering due to the high frequence of updates.
+- The progress bar refresh rate is fixed to avoid flickering due to the high frequency of updates.
 - The progress bar length is sized according to the length of the dictionary.
 
 The integration is rather straightforward on the workers' side; simply increment the progress bar after each candidate.
@@ -813,7 +813,7 @@ Instead of 8 cores, there are 4 physical cores and 2 logical threads per core!
 
 In my case this is [Intel's Hyper-threading Technology](https://en.wikipedia.org/wiki/Hyper-threading), which enables cores to have two lanes of execution. The core can switch between those while waiting for data to be fetched from main memory or caches.
 
-Outside of the various marketing performance claims from Intel, it seems that `Hyper-threading` is not adapted to all types of workload.
+Outside the various marketing performance claims from Intel, it seems that `Hyper-threading` is not adapted to all types of workload.
 
 Given our very CPU-heavy workload, in which we need the full attention of each core on a single worker. It makes sense to not rely on it and only use the number of physical cores to size the number of workers.
 
@@ -1039,7 +1039,7 @@ It seems `1000` yields the best results.
 | `5000` | 218.929 ± 0.114 | 218.848 | 219.009 | 1.01 ± 0.00 |
 | `10000` | 222.792 ± 0.213 | 222.642 | 222.943 | 1.03 ± 0.00 |
 
-However, the version without batching for 4 cores used to run in 224 seconds. That's only an 8 second improvement. I am not sure it is worth the added complexity.
+However, the version without batching for 4 cores used to run in 224 seconds. That's only an 8-second improvement. I am not sure if it is worth the added complexity.
 
 We started from a wild guess regarding the source of the synchronization, so we should not be surprised by the disappointing results.
 
@@ -1051,7 +1051,7 @@ Our dictionary approach was great to get us started, but in real life, it is rat
 
 Well, at least it did not work for me.
 
-A password generator is present in the final code available at [zip-password-finder](https://github.com/agourlay/zip-password-finder) but I won't go into the implementation details because the code is rather ugly and does not add much at this point.
+A password generator is present in the final code available at [zip-password-finder](https://github.com/agourlay/zip-password-finder), but I won't go into the implementation details because the code is rather ugly and does not add much at this point.
 
 What we need is to generate all the possible passwords based on a set of constraints.
 
@@ -1094,7 +1094,7 @@ I will make sure to document my progress in a follow-up article.
 
 In this article we have built a simple tool in Rust to brute force the password of protected ZIP archives.
 
-It can process around 4500 passwords/sec on 4 cores machines and has issues scaling up which makes it impractical for non trivial passwords.
+It can process around 4500 passwords/sec on 4 cores machines and has issues scaling up which makes it impractical for non-trivial passwords.
 
 To get there we have learned how to apply the `pool of workers` pattern and how to shut it down gracefully.
 

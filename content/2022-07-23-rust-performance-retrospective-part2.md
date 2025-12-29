@@ -205,13 +205,13 @@ hyperfine --runs 3 \
 | `0.3.3` | 77.442 ± 2.537 | 74.513 | 78.968 | 1.00 |
 | `box` | 270.785 ± 0.907 | 270.031 | 271.792 | 3.50 ± 0.12 |
 
-Ouch! It is over three times times slower!
+Ouch! It is over three times slower!
 
 Let's have a look at the flamegraph to understand where the CPU spends its time.
 
 ![Flamegraph with boxing](/2022-07-23/flamegraph-box.png)
 
-In purple you can see the cost of `Box::new` in the parser thread (full [flamegraph](/2022-07-23/flamegraph-box.svg) available).
+In purple, you can see the cost of `Box::new` in the parser thread (full [flamegraph](/2022-07-23/flamegraph-box.svg) available).
 
 Welp, we did fix the `memcpy` issue, but the application is terribly slow.
 

@@ -19,7 +19,7 @@ In a previous life, I found myself needing to analyze large JVM heap dumps. For 
 
 The JVM ecosystem is pretty rich in terms of tooling regarding heap dump analysis. Most JVM developers are familiar with [VisualVM](https://visualvm.github.io/) and [EclipseMat](https://www.eclipse.org/mat/).
 
-Those tools are truly excellent; they offer a large panel of [features](https://eclipsesource.com/blogs/2013/01/21/10-tips-for-using-the-eclipse-memory-analyzer/) to drill down on the content of heap dumps to help you pin point your issue very precisely.
+Those tools are truly excellent; they offer a large panel of [features](https://eclipsesource.com/blogs/2013/01/21/10-tips-for-using-the-eclipse-memory-analyzer/) to drill down on the content of heap dumps to help you pinpoint your issue very precisely.
 
 However, they tend to be extremely memory hungry and slow when analyzing large files, which is forcing users to spin up expensive beefy instance from a cloud provider to get the job done.
 
@@ -54,7 +54,7 @@ Let's process that 2Mb heap dump!
 ./hprof-slurp -i "hprof-64.bin"
 ```
 
-Which instaneously yields those two tables
+Which instantaneously yields those two tables
 
 ```textile
 Top 20 allocated classes:
@@ -120,7 +120,7 @@ Here is a simplified architecture diagram for the current version (0.4.7).
 
 The various threads are wired up together via channels to form a processing pipeline where all stages run in parallel (if the host has enough cores).
 
-The file reader thread pro-actively loads chunks of 64Mb from the input file to not starve the rest of the pipeline while waiting for IO. Loading too many chunks in advance has a direct impact on the memory usage, so I settled on 3 chunks based on experiments.
+The file reader thread proactively loads chunks of 64Mb from the input file to not starve the rest of the pipeline while waiting for IO. Loading too many chunks in advance has a direct impact on the memory usage, so I settled on 3 chunks based on experiments.
 
 Those chunks are then sent over to the streaming parser which was the most challenging work of the project because it must handle incomplete inputs.
 A single chunk can contain millions of records, and a chunk is of course not aligned on the actual boundary of the `hprof` records.
@@ -145,9 +145,9 @@ For the sake of transparency or reproducibility, I will show you exactly how to 
 
 To avoid completely synthetic data, we will be using [Spring's REST petclinic](https://github.com/spring-petclinic/spring-petclinic-rest).
 
-It is a reasonable choice because it is relatively well known and it uses an in-memory database by default which naturally amplifies the memory usage.
+It is a reasonable choice because it is relatively well known, and it uses an in-memory database by default which naturally amplifies the memory usage.
 
-In order to not waste too much time growing the heap, we will simply use the Java [Epsilon GC](https://blogs.oracle.com/javamagazine/post/epsilon-the-jdks-do-nothing-garbage-collector) which does not cleanup anything.
+In order to not waste too much time growing the heap, we will simply use the Java [Epsilon GC](https://blogs.oracle.com/javamagazine/post/epsilon-the-jdks-do-nothing-garbage-collector) which does not clean up anything.
 
 This is the change to apply if you want to try this at home.
 
@@ -289,7 +289,7 @@ Using the benchmarking tool [hyperfine](https://github.com/sharkdp/hyperfine) we
 
 For reference, I will be running the benchmarks on a laptop running Linux on an Intel [i7-10610U](https://www.intel.com/content/www/us/en/products/sku/201896/intel-core-i710610u-processor-8m-cache-up-to-4-90-ghz/specifications.html) CPU.  
 
-In this comparison analysis, we are interested in the relative speedup between releases and not the absolute durations, which are mostly a function of the dump size given a stable thoughtput.
+In this comparison analysis, we are interested in the relative speedup between releases and not the absolute durations, which are mostly a function of the dump size given a stable throughput.
 
 After downloading all the versions of `hprof-slurp` into the same directory, we can compare how they handle the `pets.bin` heap dump using the following `hyperfine` magic incantation.
 
@@ -315,7 +315,7 @@ hyperfine --runs 3 \
  -n 0.4.7 "./hprof-slurp-0.4.7 -i pets.bin"
 ```
 
-Which - after a long time - yields the following markdown table in `hprof.md`.
+Which - after a long time - yields the following Markdown table in `hprof.md`.
 
 | Command | Mean [s] | Min [s] | Max [s] | Relative |
 |:---|---:|---:|---:|---:|
@@ -369,7 +369,7 @@ One could expect a stable similar memory usage for much larger dumps unless thos
 
 Obviously, I am still interested in making `hprof-slurp` faster — hopefully not at the expense of code readability.
 
-Outside of the performance concern, I believe the output could still be improved to be more useful.
+Outside the performance concern, I believe the output could still be improved to be more useful.
 
 First, I would like to validate the precision of the statistics reported by comparing the output of `hprof-slurp` against the existing tools. My gut feeling is that the numbers are not too far off and serve as a pretty good proxy.
 

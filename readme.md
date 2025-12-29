@@ -14,4 +14,4 @@ git submodule add https://github.com/zbrox/anpu-zola-theme themes/anpu
 
 Locally with `zola serve`.
 
-On Github pages with an [action](https://www.getzola.org/documentation/deployment/github-pages/).
+On GitHub pages with an [action](https://www.getzola.org/documentation/deployment/github-pages/).

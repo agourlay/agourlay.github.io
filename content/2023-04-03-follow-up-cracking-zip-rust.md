@@ -103,7 +103,7 @@ Improving on this limitation is critical for being able to work against real-wor
 
 We will reuse this test file for the benchmarks in the rest of the article.
 
-## Indepedent workers
+## Independent workers
 
 Previous measurements clearly showed that performance did not improve linearly with the number of workers.
 

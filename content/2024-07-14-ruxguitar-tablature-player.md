@@ -23,7 +23,7 @@ E|-----------------|-----------------|-----------------|-----------------| <- to
 
 This song is played in standard tuning (EADGBe), which is conveyed by the letters on the left indicating the tuning for each string. While the numbers indicate where to put your fingers on the fretboard.
 
-Beyond the text representation, the defacto standard is the format used by the [Guitar Pro](https://www.guitar-pro.com/) software to render and synthetize sound for the tablature.
+Beyond the text representation, the defacto standard is the format used by the [Guitar Pro](https://www.guitar-pro.com/) software to render and synthesize sound for the tablature.
 
 Those binary files have the `.gp3`, `.gp4`, `.gp5` or `.gp6` extension depending on the software version used to produce them, and can be easily found on the internet on websites such as [Ultimate Guitar](https://www.ultimate-guitar.com/).
 
@@ -153,7 +153,7 @@ To ensure correctness, I have written a few unit tests for specific tablature fi
 
 This approach is useful to get started but not very scalable, so I am also validating some high level invariants of the resulting `Song` structure over a directory containing several hundred tablatures.
 
-I found a few bugs in the parser this way and I am confident that the parser is working as expected.
+I found a few bugs in the parser this way, and I am confident that the parser is working as expected.
 
 # Building a UI
 
@@ -289,9 +289,9 @@ All those events are pushed into a single array sorted by the event tick.
 
 This approach provides an efficient way to find the next events to play at any given time via binary search later on.
 
-Those `MidiEvents` can be transformed into audio waves using a synthetizer before being sent to the audio output.
+Those `MidiEvents` can be transformed into audio waves using a synthesizer before being sent to the audio output.
 
-For the synthetizer I settled on the [rustysynth](https://github.com/sinshu/rustysynth) crate which provides a neat MIDI synthetizer.
+For the synthesizer I settled on the [rustysynth](https://github.com/sinshu/rustysynth) crate which provides a neat MIDI synthesizer.
 
 Here is a simplified version of the code to play a MIDI event:
 
@@ -335,7 +335,7 @@ The audio output stream is managed by a dedicated thread which will produce soun
 
 I picked the [cpal](https://github.com/RustAudio/cpal) crate which is a cross-platform audio library.
 
-Here is a simplified version of the code to setup an audio loop:
+Here is a simplified version of the code to set up an audio loop:
 
 ```rust
 let host = cpal::default_host();
@@ -454,7 +454,7 @@ The update function does not care whether the message has been triggered by the 
 
 Using a similar mechanism, the audio player can send messages to the application to update the UI based on the current playback position.
 
-The application holds the receiving end of an [tokio::sync::watch](https://docs.rs/tokio/latest/tokio/sync/watch/index.html) channel containing the current timestamp which is published by the audio thread.
+The application holds the receiving end of a [tokio::sync::watch](https://docs.rs/tokio/latest/tokio/sync/watch/index.html) channel containing the current timestamp which is published by the audio thread.
 
 ```rust
 fn audio_player_beat_subscription(&self) -> impl Stream<Item = Message> {
