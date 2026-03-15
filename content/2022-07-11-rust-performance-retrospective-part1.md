@@ -135,7 +135,7 @@ As the content of the file is streamed through the parser, the classes informati
 
 Spoiler alert: as of version 0.4.7, the performance bottleneck is the parsing thread.
 
-Speeding up other stages of the pipelines would not yield any performance improvements.
+Speeding up other stages of the pipeline would not yield any performance improvements.
 
 ## Test data
 
@@ -174,7 +174,7 @@ index b936a37..7621eb9 100644
 
 ```
 
-You could also add `-XX:+HeapDumpOnOutOfMemoryError` if you prefer to produce a heap dump whenever an `OutOfMemory Error` is thrown instead of performing the dump manually.
+You could also add `-XX:+HeapDumpOnOutOfMemoryError` if you prefer to produce a heap dump whenever an `OutOfMemoryError` is thrown instead of performing the dump manually.
 
 In any case we can start the application using Maven.
 

@@ -38,7 +38,7 @@ RUSTFLAGS=-Zprint-type-sizes cargo +nightly build --release
 
 In my opinion, it can be a bit cumbersome to navigate the output of `-Zprint-type-sizes`.
 
-One alternative recommended by the Rust performance book is to use  DHAT’s “copy profiling” mode, which works great as well.
+One alternative recommended by the Rust performance book is to use DHAT’s “copy profiling” mode, which works great as well.
 
 I will stick to `-Zprint-type-sizes` for the remainder of the article as it helps understand the memory layout on the way.
 
@@ -154,7 +154,7 @@ Moreover, there is a critical observation to make regarding enums.
 
 An enum is sized with its largest variant plus some memory for an internal discriminant field.
 
-This means the 134 bytes for a `GcSegment` are being allocated for every `parser::record::Record` variants.
+This means the 134 bytes for a `GcSegment` are being allocated for every `parser::record::Record` variant.
 
 This quickly adds up when a program is crunching millions of records.
 
@@ -254,7 +254,7 @@ pub enum GcRecord {
 }   
 ```
 
-The `Vector` type contains three words: a length, a capacity, and a pointer. That is 3 * 8 = 24 bytes on a 64-bits architecture.
+The `Vec` type contains three words: a length, a capacity, and a pointer. That is 3 * 8 = 24 bytes on a 64-bits architecture.
 
 Boxing each vector would save 16 bytes per field.
 

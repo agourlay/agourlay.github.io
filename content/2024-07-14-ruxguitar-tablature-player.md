@@ -21,9 +21,9 @@ A|-5-------------5-|-----------------|-5---------------|---5-------------|
 E|-----------------|-----------------|-----------------|-----------------| <- top
 ```
 
-This song is played in standard tuning (EADGBe), which is conveyed by the letters on the left indicating the tuning for each string. While the numbers indicate where to put your fingers on the fretboard.
+This song is played in standard tuning (EADGBe), which is conveyed by the letters on the left indicating the tuning for each string, while the numbers indicate where to put your fingers on the fretboard.
 
-Beyond the text representation, the defacto standard is the format used by the [Guitar Pro](https://www.guitar-pro.com/) software to render and synthesize sound for the tablature.
+Beyond the text representation, the de facto standard is the format used by the [Guitar Pro](https://www.guitar-pro.com/) software to render and synthesize sound for the tablature.
 
 Those binary files have the `.gp3`, `.gp4`, `.gp5` or `.gp6` extension depending on the software version used to produce them, and can be easily found on the internet on websites such as [Ultimate Guitar](https://www.ultimate-guitar.com/).
 
@@ -183,7 +183,7 @@ At some point, I ran into a bug in version `0.12.0` which forced me to upgrade t
 
 This means I had to use the `main` branch of the `Iced` repository which was a bit scary but it worked out fine.
 
-All the breakages I encountered were due to the `Iced` library being in active development and I am very grateful for the maintainers for their hard work.
+All the breakages I encountered were due to the `Iced` library being in active development and I am very grateful to the maintainers for their hard work.
 
 The library is architectured around messages and subscriptions that trigger the update of the UI.
 
@@ -225,7 +225,7 @@ impl RuxApplication {
 
 The application is built around functions that are orchestrated by the `Iced` engine appropriately.
 
-The `update` function has for signature `Fn(&mut State, Message) -> C` where:
+The `update` function has the signature `Fn(&mut State, Message) -> C` where:
 - `State` is the application state that can be modified (here `RuxApplication`)
 - `Message` is the message to process
 - `C` is an output `Task` potentially producing a new `Message`
@@ -237,7 +237,7 @@ The `view` function has the signature `Fn(&'a State) -> Widget` and renders a `W
 I started by crafting the code which carefully draws a single measure on an `Iced::Canvas`.
 
 This means:
-- drawing each strings
+- drawing each string
 - for each beat, drawing the notes on the strings and potential beat effect (e.g. palm mute)
 - for each note, adding the potential note effect (e.g. slide, hammer-on, bend) 
 - annotate the measure with additional information (e.g. measure number, tempo, part annotation, chord)
@@ -258,7 +258,7 @@ To recap, we have an in-memory representation of a tablature and we have the UI,
 
 What we want is a way to turn each note, for each beat, for each measure, for each track into a specific sound at the **right** time.
 
-This can be achieved using a MIDI synthesizer which is a software that can produce sounds based on MIDI events.
+This can be achieved using a MIDI synthesizer which is software that can produce sounds based on MIDI events.
 
 ## Synthesizing MIDI events
 
@@ -268,7 +268,7 @@ There are different kinds of MIDI events but the most important for us are the `
 - Note Off: Indicates that a note is being released.
 
 For each note in the tablature, we can generate a pair of MIDI events annotated with:
-- the timestamp, also referred as a tick, at which they should be executed.
+- the timestamp, also referred to as a tick, at which they should be executed.
 - the track to which they belong.
 
 ```rust

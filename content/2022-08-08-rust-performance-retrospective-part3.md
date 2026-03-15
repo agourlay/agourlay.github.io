@@ -41,7 +41,7 @@ The only possible implementations when using stable Rust are found in the standa
 
 In our case the culprit must be the `Result` type which is used to track the errors occurring during the parsing phase.
 
-After some digging, I found an existing [issue](https://github.com/rust-lang/rust/issues/37939) on Github appropriately named `Reduced performance when using question mark operator instead of try!` where several users are reporting similar experiences.
+After some digging, I found an existing [issue](https://github.com/rust-lang/rust/issues/37939) on GitHub appropriately named `Reduced performance when using question mark operator instead of try!` where several users are reporting similar experiences.
 
 The issue seems to be a bit stale, so we are going to use a workaround this time.
 

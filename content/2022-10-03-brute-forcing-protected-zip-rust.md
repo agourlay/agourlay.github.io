@@ -309,7 +309,7 @@ Zip file size: 202 bytes, number of entries: 1
 1 file, 9 bytes uncompressed, 16 bytes compressed:  -77.8%
 ```
 
-It is pretty small and uses compression as storage method.
+It is pretty small and uses compression as a storage method.
 
 Let's run our program!
 
@@ -468,7 +468,7 @@ And for the wiring and actual graceful shutdown.
 +    let (send_found_password, receive_found_password): (Sender<String>, Receiver<String>) =
 +        crossbeam_channel::bounded(1);
 +
-+    // stop signals to shutdown threads
++    // stop signals to shut down threads
 +    let stop_workers_signal = Arc::new(AtomicBool::new(false));
 +    let stop_gen_signal = Arc::new(AtomicBool::new(false));
 +
@@ -551,7 +551,7 @@ In addition, it is important to manually drop `send_found_password` to shut down
 3. All workers drop their clone of `Arc<send_found_password>`.
 4. Deadlock occurs: `receive_found_password.recv()` won't be triggered unless all producers are gone **but** the main thread still holds the initial `Arc<send_found_password>`.
 
-This gives us as valid shutdown sequence:
+This gives us a valid shutdown sequence:
 
 1. Drop the initial `Arc<send_found_password>`.
 2. Wait for the found password from a worker.
@@ -608,7 +608,7 @@ The progress bar needs to be configured according to our use case.
 +        .expect("Failed to create progress style");
 +    progress_bar.set_style(progress_style);
 +
-+    // Refresh terminal 2 times per seconds to avoid flickering effect
++    // Refresh terminal 2 times per second to avoid flickering effect
 +    let draw_target = ProgressDrawTarget::stdout_with_hz(2);
 +    progress_bar.set_draw_target(draw_target);
 +
@@ -821,7 +821,7 @@ Given our very CPU-heavy workload, in which we need the full attention of each c
 cargo add num_cpus
 ```
 
-The previous benchmark has also shown that the best performance occurs where the number of workers is equal to the number cores, meaning that the reader thread is very cheap in comparison.
+The previous benchmark has also shown that the best performance occurs where the number of workers is equal to the number of cores, meaning that the reader thread is very cheap in comparison.
 
 ```diff
      let workers: usize = match args_iter.next() {
@@ -855,7 +855,7 @@ We can zoom in on one of the workers.
 
 It is basically spending most of its time in `sha1::compress::soft::compress` in a deep call stack from `zip-rs`.
 
-There is nothing obvious to optimize from our worker code  given the decryption API we have to work with.
+There is nothing obvious to optimize from our worker code given the decryption API we have to work with.
 
 We can focus on decreasing potential synchronization issues between our worker threads. When can they possibly interfere with each other?
 

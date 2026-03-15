@@ -350,7 +350,7 @@ Each worker is busy doing the following: (full [flamegraph](/2023-04-03/final-fl
 
 Computing the SHA1 for each candidate takes up to 90% of the total CPU time; improving this implementation would have a **massive** impact on the runtime!
 
-It is interesting to note that function is called `sha1::compress::soft::compress` - now that's a weird name.
+It is interesting to note that the function is called `sha1::compress::soft::compress` - now that's a weird name.
 
 Let's take a look under the [hood](https://github.com/RustCrypto/hashes/blob/master/sha1/src/compress/x86.rs#L102).
 
@@ -537,7 +537,7 @@ For the charset:
   b | 0x00 - 0xff
 ```
 
-According to the [documentation](https://hashcat.net/wiki/doku.php?id=mask_attack), it seems we need to setup a four-characters mask that will be explored incrementally.
+According to the [documentation](https://hashcat.net/wiki/doku.php?id=mask_attack), it seems we need to set up a four-character mask that will be explored incrementally.
 
 After a bit of trial and error, it gives the following magic incantation:
 
@@ -692,7 +692,7 @@ For this reason, I expect the difference between the two tools to be much larger
 
 Especially if you have a real graphics card, the throughput will likely be expressed in `MH`.
 
-Hashcat is a fantastic tool with great performance; it was however not easy to setup, so it may be reserved for advanced users.
+Hashcat is a fantastic tool with great performance; it was however not easy to set up, so it may be reserved for advanced users.
 
 ## Future work
 
@@ -702,7 +702,7 @@ Talking about testing different hardware, it would be great to have results usin
 
 Being able to speed up the default implementation of the `sha1` crate would also yield significant gains.
 
-A current issue is the accumulation of technical debt; by contributing the AES info extraction helpers upstream to the `zip-rs`, we would avoid having to maintain a fork forever.
+A current issue is the accumulation of technical debt; by contributing the AES info extraction helpers upstream to `zip-rs`, we would avoid having to maintain a fork forever.
 
 Finally, Hashcat has made a great impression, and I would like to explore it for further inspiration.
 
