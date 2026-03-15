@@ -230,7 +230,7 @@ The `update` function has for signature `Fn(&mut State, Message) -> C` where:
 - `Message` is the message to process
 - `C` is an output `Task` potentially producing a new `Message`
 
-The `view` function has for signature `Fn(&'a State) -> Widget` is rendering a `Widget` based on the current `&State`.
+The `view` function has the signature `Fn(&'a State) -> Widget` and renders a `Widget` based on the current `&State`.
 
 ## Drawing the tablature
 
@@ -311,7 +311,7 @@ match midi_event.event {
 }                    
 ```
 
-It is important to note that a synthetizer requires a soundfont file to produce sound.
+It is important to note that a synthesizer requires a soundfont file to produce sound.
 
 For the sake of simplicity, I included the `TimGM6mb.sf2` soundfont file in the binary at compile time.
 

@@ -88,7 +88,7 @@ Our program will have a thread reading the content of the password dictionary an
 
 There will be millions of password candidates. We need something very fast.
 
-We will use the [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) crate for our channels because they are far superior to the channels available in `std:: sync:: mpsc` in every way.
+We will use the [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) crate for our channels because they are far superior to the channels available in `std::sync::mpsc` in every way.
 
 Those better channels might even make it to the standard library in the [future](https://github.com/rust-lang/rust/pull/93563).
 
@@ -1070,7 +1070,7 @@ for i in min_password_len..=max_password_len {
 
 Here is an example to convince yourself that this grows very fast.
 
-Given a charset with lowercase letters, upper case laters and digits. Forming a set of `26 + 26 + 10 = 62` elements.
+Given a charset with lowercase letters, upper case letters and digits. Forming a set of `26 + 26 + 10 = 62` elements.
 
 A simple 7 characters passwords using elements from this charset yields `62^7 = 3.521.614.606.208` combinations.
 

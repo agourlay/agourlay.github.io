@@ -22,7 +22,7 @@ There is still room for improvement as important pieces of information are missi
 
 However, the addition of this feature is a net improvement over what was previously possible and will hopefully help users during their investigations.
 
-All non-empty threads's stacktraces are reported and their format should be compatible with existing tools, such as the `Analyze stacktrace` feature in IntelliJ IDEA for convenience.
+All non-empty threads' stacktraces are reported and their format should be compatible with existing tools, such as the `Analyze stacktrace` feature in IntelliJ IDEA for convenience.
 
 ## Example
 

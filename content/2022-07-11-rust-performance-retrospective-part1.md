@@ -21,7 +21,7 @@ The JVM ecosystem is pretty rich in terms of tooling regarding heap dump analysi
 
 Those tools are truly excellent; they offer a large panel of [features](https://eclipsesource.com/blogs/2013/01/21/10-tips-for-using-the-eclipse-memory-analyzer/) to drill down on the content of heap dumps to help you pinpoint your issue very precisely.
 
-However, they tend to be extremely memory hungry and slow when analyzing large files, which is forcing users to spin up expensive beefy instance from a cloud provider to get the job done.
+However, they tend to be extremely memory hungry and slow when analyzing large files, which is forcing users to spin up expensive beefy instances from a cloud provider to get the job done.
 
 The tool I needed was fairly specific, my main concern was to get a quick overview of large heap dumps using a regular developer machine to decide if it actually makes sense to investigate further using the aforementioned workflow.
 

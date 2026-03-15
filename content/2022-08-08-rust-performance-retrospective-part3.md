@@ -238,7 +238,7 @@ An important aspect of performance work is that diminishing returns can occur qu
 
 In this article, we have learned that the question mark operator can have an impact on the runtime performance of a program.
 
-How much of an impact, however,  depends on the exact workload of the program and where the operator is used.
+How much of an impact, however, depends on the exact workload of the program and where the operator is used.
 
 It seems reasonable to believe that this behaviour should not be an issue for the majority of Rust programs out there where the question mark operator is not used to shortcut very hot code.
 

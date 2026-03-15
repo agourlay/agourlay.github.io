@@ -414,7 +414,7 @@ There are two possible values for it:
 lto = "thin" or "fat"
 ```
 
-A second idea is to a build binary with the best instructions for the current CPU.
+A second idea is to build a binary with the best instructions for the current CPU.
 
 ```bash
 RUSTFLAGS="-C target-cpu=native" cargo build --release
@@ -480,7 +480,7 @@ yields the text
 secret.zip/secret.txt:$zip2$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a99031db50f79a*d9e156b830df03899575*$/zip2$:secret.txt:secret.zip:/home/agourlay/zip-files/secret.zip
 ```
 
-The output needs to be cleaned up and saved into into a file, `hash.txt` here.
+The output needs to be cleaned up and saved into a file, `hash.txt` here.
 
 ```txt
 $zip2$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a99031db50f79a*d9e156b830df03899575*$/zip2$
@@ -680,7 +680,7 @@ user 0m6,331s
 sys  0m10,747s
 ```
 
-That's a lot of logs; each bloc represents the outcome of the exploration of length-value space.
+That's a lot of logs; each block represents the outcome of the exploration of length-value space.
 
 In any case, it found the password in 23 seconds, two times faster than `zip-password-finder`!
 
@@ -708,7 +708,7 @@ Finally, Hashcat has made a great impression, and I would like to explore it for
 
 ## Conclusion
 
-This article has explained a few performance optimizations that helped making `zip-password-finder` a bit faster over time.
+This article has explained a few performance optimizations that helped make `zip-password-finder` a bit faster over time.
 
 However, it has also highlighted that the recent efforts have entered a zone of diminishing returns due to a clear bottleneck.
 

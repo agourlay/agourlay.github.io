@@ -229,7 +229,7 @@ Based on the enumeration sizing discovery, we know that the 127 bytes for a `Cla
 
 However, the `ClassDump` is a relatively rare element compared to the actual instance dumps. An application has a few hundred classes but millions of instances.
 
-It is unfortunate to systematically pay the full price for something that is unfrequent.
+It is unfortunate to systematically pay the full price for something that is infrequent.
 
 The intuition is that we should be moving the boxing cost to the `ClassDump` only.
 
@@ -354,7 +354,7 @@ print-type-size     discriminant: 1 bytes
 print-type-size     variant `ClassDump`: 63 bytes
 print-type-size         padding: 1 bytes
 print-type-size         field `.constant_pool_size`: 2 bytes, alignment: 2 bytes
-print-type-size         field `.stack_trace_serial_number`: 4 ytes
+print-type-size         field `.stack_trace_serial_number`: 4 bytes
 print-type-size         field `.instance_size`: 4 bytes
 print-type-size         padding: 4 bytes
 print-type-size         field `.class_object_id`: 8 bytes, alignment: 8 bytes
