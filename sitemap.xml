@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc> https://agourlay.github.io/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/brute-forcing-protected-zip-rust/</loc>
+        <lastmod>2022-10-03</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/categories/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/categories/series/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/follow-up-cracking-zip-rust/</loc>
+        <lastmod>2023-04-03</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/linz-rust-meetup-qdrant/</loc>
+        <lastmod>2023-05-12</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/page/1/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/pages/about/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/qdrant-new-kv-storage/</loc>
+        <lastmod>2025-02-10</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/rust-performance-retrospective-part1/</loc>
+        <lastmod>2022-07-11</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/rust-performance-retrospective-part2/</loc>
+        <lastmod>2022-07-23</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/rust-performance-retrospective-part3/</loc>
+        <lastmod>2022-08-08</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/ruxguitar-tablature-player/</loc>
+        <lastmod>2024-07-14</lastmod>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/benchmarking/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/hprof-slurp/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/memcopy/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/multithreading/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/music/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/performance/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/qdrant/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/release/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/rust/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/ruxguitar/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/security/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/storage/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/talk/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/tags/try-trait/</loc>
+    </url>
+    <url>
+        <loc> https://agourlay.github.io/threads-in-hprof-slurp-0-5-0/</loc>
+        <lastmod>2022-10-17</lastmod>
+    </url>
+</urlset>
