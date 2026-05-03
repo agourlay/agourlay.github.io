@@ -28,6 +28,7 @@ My father told stories of driving Massey-Ferguson tractors as a kid and I rememb
 I'd only get to pretend to drive at those agricultural fairs, standing on the clutch and gripping the massive wheel.
 
 ![Massey-Ferguson 35 Deluxe tractor](/2026-05-03/massey-ferguson-35.jpg)
+*Massey-Ferguson 35 Deluxe.*  
 *Photo: [Acroterion](https://commons.wikimedia.org/wiki/User:Acroterion), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)*
 
 Comfortable around machines, he enrolled in a trade school in the 1960s where he eventually discovered the world of analog electronics.
