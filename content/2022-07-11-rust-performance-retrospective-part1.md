@@ -131,7 +131,7 @@ More concretely, it has been written by following the [full specification of the
 
 The parser itself is written with the [nom](https://github.com/Geal/nom) library, which I found a real pleasure to work with due to its support for parsing incomplete data.
 
-As the content of the file is streamed through the parser, the classes information is extracted and forwarded to the statistics recorder thread which keeps track of the instance counts in order to later compute the heavy hitters.
+As the content of the file is streamed through the parser, the class information is extracted and forwarded to the statistics recorder thread which keeps track of the instance counts in order to later compute the heavy hitters.
 
 Spoiler alert: as of version 0.4.7, the performance bottleneck is the parsing thread.
 

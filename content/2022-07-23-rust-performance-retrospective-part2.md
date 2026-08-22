@@ -254,7 +254,7 @@ pub enum GcRecord {
 }   
 ```
 
-The `Vec` type contains three words: a length, a capacity, and a pointer. That is 3 * 8 = 24 bytes on a 64-bits architecture.
+The `Vec` type contains three words: a length, a capacity, and a pointer. That is 3 * 8 = 24 bytes on a 64-bit architecture.
 
 Boxing each vector would save 16 bytes per field.
 

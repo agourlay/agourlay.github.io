@@ -31,7 +31,7 @@ Although the software to play the tablature is proprietary, some versions of the
 
 The best OSS tablature player is probably [TuxGuitar](https://sourceforge.net/projects/tuxguitar/) which is very feature-rich and a fantastic tool to learn guitar.
 
-Since `TuxGuitar` appears to be unmaintained and Java based, I thought it would be a fun challenge to write my own tablature player in Rust.
+Since `TuxGuitar` appears to be unmaintained and Java-based, I thought it would be a fun challenge to write my own tablature player in Rust.
 
 # Introducing Ruxguitar
 
@@ -185,7 +185,7 @@ This means I had to use the `main` branch of the `Iced` repository which was a b
 
 All the breakages I encountered were due to the `Iced` library being in active development and I am very grateful to the maintainers for their hard work.
 
-The library is architectured around messages and subscriptions that trigger the update of the UI.
+The library is architected around messages and subscriptions that trigger the update of the UI.
 
 For instance, those are my messages:
 
@@ -321,7 +321,7 @@ const TIMIDITY_SOUND_FONT: &[u8] = include_bytes!("../../resources/TimGM6mb.sf2"
 
 The trade-off is that the binary is a bit larger but the user does not have to worry about finding the soundfont file.
 
-However, it is possible to provide a larger soundfont file to get better sound quality using the `--soundfont` command line argument.
+However, it is possible to provide a larger soundfont file to get better sound quality using the `--sound-font-file` command line argument.
 
 For instance, I like to use `FluidR3_GM.sf2` which is present on most systems and easy to find online ([here](https://musical-artifacts.com/artifacts/738) or [there](https://member.keymusician.com/Member/FluidR3_GM/index.html)).
 
@@ -360,7 +360,7 @@ let stream = device.build_output_stream(
         let midi_events = // find events to play
         for event in midi_events {
             // synthesize events
-            synthetizer.process(event)
+            synthesizer.process(event)
         }
 
         // Split buffer in two channels (left and right)

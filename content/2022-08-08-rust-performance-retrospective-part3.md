@@ -222,7 +222,7 @@ hyperfine --runs 10 \
  --warmup 5 \
  --export-markdown hprof.md \
  -n with-? "./hprof-slurp-with-? -i pets.bin" \
- -n with-combinators "./hprof-slurp-combinators -i pets.bin"
+ -n with-combinators "./hprof-slurp-combinators -i pets.bin" \
  -n with-nom-combinators "./hprof-slurp-combinators -i pets.bin"
 ```
 

@@ -132,7 +132,7 @@ There are a few interesting things to note here:
 
 ## Password checker worker
 
-We will be using the [zip-rs](https://github.com/zip-rs/zip) for testing the password candidates pulled from the channel.
+We will be using the [zip-rs](https://github.com/zip-rs/zip) crate for testing the password candidates pulled from the channel.
 
 ```bash
 cargo add zip
@@ -340,7 +340,7 @@ sys     0m41,570s
 
 First the good news: the program found the password!
 
-It processed 1 million passwords in around five minutes using 3 workers which gives us:
+It processed 1 million passwords in around four minutes using 3 workers which gives us:
 
 ```txt
 1.000.000 passwords tested / (4 * 60 seconds) / 3 workers =
@@ -699,9 +699,9 @@ What about automatically sizing the number of workers according to the host?
 +    let workers = max(1,  num_cores - 1);
 ```
 
-With this change, we are using `num_core - 1` worker threads and one dictionary reader thread.
+With this change, we are using `num_cores - 1` worker threads and one dictionary reader thread.
 
-On my 8 cores machine, it yields the following usage.
+On my 8-core machine, it yields the following usage.
 
 ![CPU usage 7 workers](/2022-10-03/htop-7-workers.png)
 
@@ -1019,7 +1019,7 @@ hyperfine --runs 2 \
  --export-markdown batch.md \
  --export-json batch.json \
  -n 10 "./zip-password-finder encrypted-test-dict.zip 10" \
- -n 50 "./zip-password-finder encrypted-test-dict.zip 10" \
+ -n 50 "./zip-password-finder encrypted-test-dict.zip 50" \
  -n 100 "./zip-password-finder encrypted-test-dict.zip 100" \
  -n 500 "./zip-password-finder encrypted-test-dict.zip 500" \
  -n 1000 "./zip-password-finder encrypted-test-dict.zip 1000" \
@@ -1072,7 +1072,7 @@ Here is an example to convince yourself that this grows very fast.
 
 Given a charset with lowercase letters, upper case letters and digits. Forming a set of `26 + 26 + 10 = 62` elements.
 
-A simple 7 characters passwords using elements from this charset yields `62^7 = 3.521.614.606.208` combinations.
+A simple 7-character password using elements from this charset yields `62^7 = 3.521.614.606.208` combinations.
 
 `62^7 passwords / 4500 passwords per sec / 60 / 60 / 24 / 365 =~ 25 years`
 
@@ -1086,7 +1086,7 @@ However, given the current throughput, I'd have to let the program run for much 
 
 Fixing the scalability issue is the most important task to make this application run efficiently on machines with a higher core count.
 
-Then, improving the nominal performance per worker by investigating possible gains in the `zip.rs` crate or a different approach to get a multiplying effect.
+Then, improving the nominal performance per worker by investigating possible gains in the `zip-rs` crate or a different approach to get a multiplying effect.
 
 I will make sure to document my progress in a follow-up article.
 
@@ -1094,7 +1094,7 @@ I will make sure to document my progress in a follow-up article.
 
 In this article we have built a simple tool in Rust to brute force the password of protected ZIP archives.
 
-It can process around 4500 passwords/sec on 4 cores machines and has issues scaling up which makes it impractical for non-trivial passwords.
+It can process around 4500 passwords/sec on 4-core machines and has issues scaling up which makes it impractical for non-trivial passwords.
 
 To get there we have learned how to apply the `pool of workers` pattern and how to shut it down gracefully.
 

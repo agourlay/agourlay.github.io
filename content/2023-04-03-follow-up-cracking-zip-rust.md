@@ -59,7 +59,7 @@ Options:
           Print version information
 ```
 
-We can give it a try by creating an encrypted zip archive; let's call it `secret.zip` with the four-characters password `"ab12"`.
+We can give it a try by creating an encrypted zip archive; let's call it `secret.zip` with the four-character password `"ab12"`.
 
 ```bash
 zipinfo secret.zip 
@@ -93,7 +93,7 @@ user 3m40,620s
 sys  0m2,431s
 ```
 
-Finding a 4-letters password on such a small charset was a rather easy task for a modern CPU.
+Finding a 4-letter password on such a small charset was a rather easy task for a modern CPU.
 
 There are only `(26 lower + 26 upper + 10 digit)^4 = 14.776.336` candidates to test.
 
@@ -107,7 +107,7 @@ We will reuse this test file for the benchmarks in the rest of the article.
 
 Previous measurements clearly showed that performance did not improve linearly with the number of workers.
 
-We previously attributed the flat line between 4 and 8 workers to the Hyperthreading on my CPU, which does not bode well for this type of workload.
+We previously attributed the flat line between 4 and 8 workers to the Hyper-threading on my CPU, which does not bode well for this type of workload.
 
 ![Scalability](/2023-04-03/scalability.png)
 
@@ -133,7 +133,7 @@ This way, we remove all coordination at runtime, so the workers can make progres
 
 ![New architecture](/2023-04-03/new-architecture.png)
 
-This pattern can be elegantly integrated by refactoring the dictionary reader and password generator to be proper `Iterator`.
+This pattern can be elegantly integrated by refactoring the dictionary reader and password generator to be proper `Iterator`s.
 
 ```rust
 let mut passwords_iter: Box<dyn Iterator<Item = String>> = match strategy {
@@ -696,7 +696,7 @@ Hashcat is a fantastic tool with great performance; it was however not easy to s
 
 ## Future work
 
-The re-architecturing has not solved the scaling issues; it would be interesting to dig deeper and benchmark the code on a machine with a much larger number of cores.
+The re-architecting has not solved the scaling issues; it would be interesting to dig deeper and benchmark the code on a machine with a much larger number of cores.
 
 Talking about testing different hardware, it would be great to have results using a CPU with the `sha` instruction to benefit from proper hardware acceleration.
 
