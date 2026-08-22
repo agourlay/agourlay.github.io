@@ -2,6 +2,7 @@
 title = "Support for thread dump in hprof-slurp 0.5.0"
 description = "The 0.5.0 release of hprof-slurp supports thread dump"
 date = 2022-10-17
+path = "threads-in-hprof-slurp-0-5-0"
 [taxonomies]
 tags=["hprof-slurp", "release"]
 +++
@@ -26,7 +27,7 @@ All non-empty threads' stacktraces are reported and their format should be compa
 
 ## Example
 
-I will use the `pets.bin` dump file introduced in a previous benchmarking [article](https://agourlay.github.io/rust-performance-retrospective-part1/).
+I will use the `pets.bin` dump file introduced in a previous benchmarking [article](/rust-performance-retrospective-part1/).
 
 This is a 34Gb heap dump taken while hammering a running instance of [Spring's REST petclinic](https://github.com/spring-petclinic/spring-petclinic-rest).
 

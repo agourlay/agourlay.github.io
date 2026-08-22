@@ -2,9 +2,9 @@
 title = "A performance retrospective using Rust (part 1)"
 description = "First part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust."
 date = 2022-07-11
+path = "rust-performance-retrospective-part1"
 [taxonomies]
-tags=["Rust", "performance", "hprof-slurp", "benchmarking"]
-categories=["series"]
+tags=["Rust", "performance", "hprof-slurp", "benchmarking", "series"]
 +++
 
 This is the first article in a series regarding making a simple JVM heap dump analyzer in Rust faster over time.
@@ -116,7 +116,7 @@ As mentioned previously, the CLI is written in Rust and works in a synchronous m
 
 Here is a simplified architecture diagram for the current version (0.4.7).
 
-![Architecture](/2022-07-11/architecture.png)
+{{ figure(src="/2022-07-11/architecture.png", alt="Architecture") }}
 
 The various threads are wired up together via channels to form a processing pipeline where all stages run in parallel (if the host has enough cores).
 
@@ -338,7 +338,7 @@ Which - after a long time - yields the following Markdown table in `hprof.md`.
 
 And using the `hprof.json` file and some python [scripts](https://github.com/sharkdp/hyperfine/tree/master/scripts) we generate the following whisker graph.
 
-![Whisker graph](/2022-07-11/hprof-graph.png)
+{{ figure(src="/2022-07-11/hprof-graph.png", alt="Whisker graph") }}
 
 Some observations:
 
@@ -356,7 +356,7 @@ heaptrack ./hprof-slurp-0.4.7 -i pets.bin
 
 This opens up the UI directly after the run if it is installed.
 
-![Heaptrack memory consumed](/2022-07-11/latest-heaptrack-consumed.png)
+{{ figure(src="/2022-07-11/latest-heaptrack-consumed.png", alt="Heaptrack memory consumed") }}
 
 The memory usage is pretty stable; it seems we have been able to stream the whole 34 Gb file within 500Mb.
 
@@ -375,7 +375,7 @@ First, I would like to validate the precision of the statistics reported by comp
 
 Moreover, additional extractions could be performed as long as it happens in a single pass, such as rendering the complete thread stack traces at the moment of the heap dump.
 
-Feel free to [reach out](/pages/about) if you have suggestions.
+Feel free to [reach out](/about/) if you have suggestions.
 
 ## Conclusion
 
@@ -383,6 +383,6 @@ This article has shown that [hprof-slurp](https://github.com/agourlay/hprof-slur
 
 It fulfills the initial goal, which was to offer a quick overview of large heap dumps using a regular developer machine.
 
-The next articles in this [series](/categories/series/) will go through a selection of the most interesting optimizations that had the largest impact on performance.
+The next articles in this [series](/tags/series/) will go through a selection of the most interesting optimizations that had the largest impact on performance.
 
 In the meantime, you can try to reproduce those results or, even better, analyze larger real-world heap dumps!

@@ -1,28 +1,49 @@
 base_url = "https://agourlay.github.io"
-
 title = "Arnaud Gourlay's blog"
 description = "Yet another programming blog"
-
-generate_feeds = true
-
+default_language = "en"
+theme = "serene"
+output_dir = "public"
 compile_sass = true
-
+minify_html = false
 build_search_index = false
-
-theme = "anpu"
-
-taxonomies = [
-    { name = "categories" },
-    { name = "tags" },
-]
+generate_feeds = true
+feed_filenames = ["atom.xml"]
+taxonomies = [{ name = "tags" }, { name = "categories" }]
 
 [markdown]
+render_emoji = false
+external_links_target_blank = false
+external_links_no_follow = true
+external_links_no_referrer = true
+smart_punctuation = false
+github_alerts = true
 
 [markdown.highlighting]
-theme = "material-theme-ocean"
+style = "class"
+light_theme = "github-light"
+dark_theme = "github-dark"
+
+[slugify]
+paths = "on"
+taxonomies = "on"
+anchors = "on"
 
 [extra]
-anpu_menu_links = [
-    { url = "$BASE_URL/tags/", name = "Tags" },
-    { url = "/pages/about", name = "About" },
+sections = [
+  { name = "posts", path = "/posts", is_external = false },
+  { name = "about", path = "/about", is_external = false },
+  { name = "github", path = "https://github.com/agourlay", is_external = true },
 ]
+blog_section_path = "/posts"
+
+back_link_text = "Back"
+force_theme = false
+
+footer_copyright = "© 2026 Arnaud Gourlay"
+footer_credits = true
+
+not_found_error_text = "404 Not Found"
+not_found_recover_text = "« back to home »"
+
+reaction = false

@@ -1,0 +1,29 @@
+<footer>
+  <div class="left">
+    <div class="copyright">
+      {{ config.extra.footer_copyright }}
+      {% if config.extra.footer_credits %}
+      <span>|</span>
+      Built with <a href="https://www.getzola.org" rel="noreferrer" target="_blank">zola</a> and <a href="https://github.com/isunjn/serene" rel="noreferrer" target="_blank">serene</a>
+      {% endif %}
+    </div>
+    <div class="sponsor">
+      Enjoying my work? Consider <a href="https://github.com/sponsors/agourlay" rel="noreferrer" target="_blank">sponsoring me</a> on GitHub.
+    </div>
+  </div>
+
+  <div class="right">
+    {% if config.generate_feeds %}
+    <a id="rss-btn" href="{{ get_url(path=config.feed_filenames.0) }}" aria-label="RSS feed">RSS</a>
+    {% endif %}
+
+    {% if not config.extra.force_theme %}
+    {% set moon_icon = load_data(path="icon/moon.svg") %}
+    {% set sun_icon = load_data(path="icon/sun.svg") %}
+    <button id="theme-toggle" aria-label="theme switch">
+      <span class="moon-icon">{{ moon_icon | safe }}</span>
+      <span class="sun-icon">{{ sun_icon | safe }}</span>
+    </button>
+    {% endif %}
+  </div>
+</footer>

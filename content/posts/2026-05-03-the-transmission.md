@@ -2,6 +2,7 @@
 title = "The transmission"
 description = "Tractors, beige boxes, and what each generation hands the next"
 date = 2026-05-03
+path = "the-transmission"
 [taxonomies]
 tags=["essay"]
 +++
@@ -27,9 +28,7 @@ One day your parents are working outside with horses, the next day the animals c
 My father told stories of driving Massey-Ferguson tractors as a kid and I remember being quite jealous at the time.
 I'd only get to pretend to drive at those agricultural fairs, standing on the clutch and gripping the massive wheel.
 
-![Massey-Ferguson 35 Deluxe tractor](/2026-05-03/massey-ferguson-35.jpg)
-*Massey-Ferguson 35 Deluxe.*  
-*Photo: [Acroterion](https://commons.wikimedia.org/wiki/User:Acroterion), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)*
+{{ figure(src="/2026-05-03/massey-ferguson-35.jpg", alt="Massey-Ferguson 35 Deluxe tractor", caption="Massey-Ferguson 35 Deluxe. <br> Photo: [Acroterion](https://commons.wikimedia.org/wiki/User:Acroterion), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)") }}
 
 Comfortable around machines, he enrolled in a trade school in the 1960s where he eventually discovered the world of analog electronics.
 
@@ -43,9 +42,7 @@ I remember the scenes: him under the car, the TV cracked open with its tube expo
 
 When I was around 13 years old, my father brought home a large beige box from Hewlett-Packard.
 
-![HP beige tower workstation](/2026-05-03/hp-workstation.jpg)
-*Tractor for millennials.*  
-*Photo: Thomas Schanz, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)*
+{{ figure(src="/2026-05-03/hp-workstation.jpg", alt="HP beige tower workstation", caption="Tractor for millennials. <br> Photo: Thomas Schanz, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)") }}
 
 That Pentium II running at 233 MHz was rather high-end for the time.
 
@@ -89,9 +86,7 @@ Beyond the technology itself, it was about tools you could take apart.
 
 But what are the tractors and beige boxes for this generation?
 
-![Child hands building with tools](/2026-05-03/jojo-builds.jpeg)
-*My son building.*  
-*Photo: me*
+{{ figure(src="/2026-05-03/jojo-builds.jpeg", alt="Child hands building with tools", caption="My son building. <br> Photo: me") }}
 
 My father's passion for repair was a product of his era. That attitude is mostly gone.
 Modern appliances aren't built to be opened, and when something breaks, you call someone or replace it.

@@ -2,6 +2,7 @@
 title = "Brute forcing protected ZIP archives in Rust"
 description = "How to brute force the password of protected ZIP archives using Rust"
 date = 2022-10-03
+path = "brute-forcing-protected-zip-rust"
 [taxonomies]
 tags=["Rust", "security", "multithreading", "benchmarking"]
 +++
@@ -34,7 +35,7 @@ Testing millions of passwords using a brute force strategy sounds like something
 
 A common approach for this type of problem is to use a set of workers to process tasks from a shared queue.
 
-![Architecture](/2022-10-03/architecture.png)
+{{ figure(src="/2022-10-03/architecture.png", alt="Architecture") }}
 
 In practice, we will orchestrate the password generator and workers as threads communicating via a channel.
 
@@ -185,10 +186,12 @@ This straightforward approach is unfortunately not enough as it yields false pos
 
 The Rustdoc for `by_index_decrypt` actually warns about it.
 
-> This function sometimes accepts wrong passwords.
-> This is because the ZIP spec only allows us to check for a 1/256 chance that the password is correct.
-> There are many passwords out there that will also pass the validity checks we are able to perform.
-> This is a weakness of the ZipCrypto algorithm, due to its fairly primitive approach to cryptography.
+{% warning(title="Warning") %}
+This function sometimes accepts wrong passwords.
+This is because the ZIP spec only allows us to check for a 1/256 chance that the password is correct.
+There are many passwords out there that will also pass the validity checks we are able to perform.
+This is a weakness of the ZipCrypto algorithm, due to its fairly primitive approach to cryptography.
+{% end %}
 
 We can work around those collisions by performing a full read of the archive with the password to make sure it is actually correct.
 
@@ -320,7 +323,7 @@ time ./zip-password-finder encrypted-test-dict.zip
 
 Checking on the CPU usage with `htop` yields an expected result.
 
-![CPU usage with 3 workers](/2022-10-03/htop-3-workers.png)
+{{ figure(src="/2022-10-03/htop-3-workers.png", alt="CPU usage with 3 workers") }}
 
 Three worker threads are going at full speed, and one thread is reading the passwords at a leisurely pace.
 
@@ -669,7 +672,7 @@ The integration is rather straightforward on the workers' side; simply increment
 
 Running this new version displays our new fancy progress bar in action!
 
-![Progress bar](/2022-10-03/progressbar.png)
+{{ figure(src="/2022-10-03/progressbar.png", alt="Progress bar") }}
 
 The processing speed and ETA confirm our previous observations.
 
@@ -703,7 +706,7 @@ With this change, we are using `num_cores - 1` worker threads and one dictionary
 
 On my 8-core machine, it yields the following usage.
 
-![CPU usage 7 workers](/2022-10-03/htop-7-workers.png)
+{{ figure(src="/2022-10-03/htop-7-workers.png", alt="CPU usage 7 workers") }}
 
 This is a nice CPU utilization to keep you warm during the winter.
 
@@ -776,7 +779,7 @@ After the runs, the `workers.md` file contains the following table:
 
 It looks quite bad. Let's plot it so that visual people can be disappointed as well.
 
-![Whiskers plot](/2022-10-03/whiskers.png)
+{{ figure(src="/2022-10-03/whiskers.png", alt="Whiskers plot") }}
 
 One would expect performance to grow linearly, but that is absolutely not the case here.
 
@@ -784,7 +787,7 @@ Not only is the speedup not linear, but the program only gets faster up to 4 wor
 
 Sounds like a good time to mention [Amdahl's law](https://en.wikipedia.org/wiki/Amdahl%27s_law), which predicts the theoretical speedup when using multiple processors depending on the portion of the work being parallel.
 
-![AmdahlsLaw graph](/2022-10-03/AmdahlsLaw-wiki.png)
+{{ figure(src="/2022-10-03/AmdahlsLaw-wiki.png", alt="AmdahlsLaw graph") }}
 
 Our workload is **supposed** to be very parallelisable, each worker processing candidate passwords in isolation at full speed. We should be getting more impressive speedups.
 
@@ -843,7 +846,7 @@ Even limiting ourselves to physical cores, the scaling from one to four cores wa
 
 For a quick sanity check, we can generate a flamegraph to see where the CPU time is spent.
 
-![Flamegraph](/2022-10-03/flamegraph.png)
+{{ figure(src="/2022-10-03/flamegraph.png", alt="Flamegraph") }}
 
 The various threads are nicely visible (full [flamegraph](/2022-10-03/flamegraph.svg) available).
 
@@ -851,7 +854,7 @@ It seems the reader thread spends most of its time snoozing, blocked when the ch
 
 We can zoom in on one of the workers.
 
-![Flamegraph](/2022-10-03/flamegraph-worker.png)
+{{ figure(src="/2022-10-03/flamegraph-worker.png", alt="Flamegraph") }}
 
 It is basically spending most of its time in `sha1::compress::soft::compress` in a deep call stack from `zip-rs`.
 
@@ -1104,10 +1107,12 @@ At a more general level, we confirmed that long passwords are very efficient aga
 
 This fact has been very well described in this [xkcd](https://xkcd.com/936/) comic.
 
-![XKCD 936](/2022-10-03/xkcd_password_strength.png)
+{{ figure(src="/2022-10-03/xkcd_password_strength.png", alt="XKCD 936") }}
 
 And that's all for today, I hope you learned a thing or two on the way - thank you for making it to the end!
 
 If you want to play with the application, the full code with better error handling & proper CLI is available at [zip-password-finder](https://github.com/agourlay/zip-password-finder).
 
-**_Update: the article submission on [reddit/r/rust](https://www.reddit.com/r/rust/comments/xv94o6/brute_forcing_protected_zip_archives_in_rust/) contains excellent comments._**
+{% note(title="Update") %}
+The article submission on [reddit/r/rust](https://www.reddit.com/r/rust/comments/xv94o6/brute_forcing_protected_zip_archives_in_rust/) contains excellent comments.
+{% end %}

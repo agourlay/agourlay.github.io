@@ -2,6 +2,7 @@
 title = "Playing guitar tablatures in Rust"
 description = "Introducing Ruxguitar, a guitar tablature player written in Rust"
 date = 2024-07-14
+path = "ruxguitar-tablature-player"
 [taxonomies]
 tags=["Rust", "music", "ruxguitar"]
 +++
@@ -244,11 +245,11 @@ This means:
 
 It required a bit of trial and error to get the offsets right but I am happy with the result.
 
-![single measure](/2024-07-14/measure.png)
+{{ figure(src="/2024-07-14/measure.png", alt="single measure") }}
 
 Once I have a collection of canvas measures, they are assembled in a responsive grid layout to display the whole tablature using the `wrap` widget from the [iced-aw](https://github.com/iced-rs/iced_aw) crate.
 
-![grid measures](/2024-07-14/grid.png)
+{{ figure(src="/2024-07-14/grid.png", alt="grid measures") }}
 
 The measures can have different lengths depending on the number of beats which makes silent measures very small and crazy guitar solo measures long.
 
@@ -481,7 +482,7 @@ Subscription::run_with_id("audio-player-beat", audio_player_beat_subscription));
 
 The tablature processes the `FocusTick` message to update the current measure position and highlight the notes.
 
-![measure cursor](/2024-07-14/measure-cursor.gif)
+{{ figure(src="/2024-07-14/measure-cursor.gif", alt="measure cursor") }}
 
 A **lot** of details were required to maintain the illusion that everything is properly synchronized with the user's actions.
 

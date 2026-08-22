@@ -1,6 +1,19 @@
 +++
 title = "About"
 description = "About me page"
+template = "prose.html"
+insert_anchor_links = "none"
+aliases = ["/pages/about/"]
+
+[extra]
+lang = 'en'
+title = "About"
+subtitle = ""
+math = false
+mermaid = false
+copy = false
+comment = false
+reaction = false
 +++
 
 Hi, I am Arnaud Gourlay 👋
@@ -13,4 +26,4 @@ I currently work on the [Qdrant](https://qdrant.tech/) open source vector databa
 
 Here is my [resume](/about/agourlay-cv.pdf).
 
-![Profile](/about/profile.jpeg)
+{{ figure(src="/about/profile.jpeg", alt="Profile") }}

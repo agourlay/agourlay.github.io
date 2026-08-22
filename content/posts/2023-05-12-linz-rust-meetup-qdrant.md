@@ -2,6 +2,7 @@
 title = "Rust Meetup Linz: Qdrant - a vector search engine in Rust"
 description = "Presentation about Rust at Qdrant"
 date = 2023-05-12
+path = "linz-rust-meetup-qdrant"
 [taxonomies]
 tags=["Rust", "Qdrant", "talk"]
 +++

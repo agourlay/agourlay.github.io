@@ -2,6 +2,7 @@
 title = "New Key-Value Store in Rust at Qdrant"
 description = "Introducing Gridstore: Qdrant's Custom Key-Value Store"
 date = 2025-02-10
+path = "qdrant-new-kv-storage"
 [taxonomies]
 tags=["Rust", "Qdrant", "storage"]
 +++

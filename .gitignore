@@ -1,1 +1,3 @@
 /public/
+# Zola generates these class-highlight stylesheets into static/ on every build
+/static/giallo-*.css

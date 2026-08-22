@@ -2,11 +2,12 @@
 title = "Follow up on cracking ZIP archives in Rust"
 description = "Progress report on zip-password-finder"
 date = 2023-04-03
+path = "follow-up-cracking-zip-rust"
 [taxonomies]
 tags=["Rust", "security", "multithreading", "benchmarking"]
 +++
 
-In a [previous article](/brute-forcing-protected-zip-rust), we explored how to build - step by step - a CLI in Rust to brute-force protected ZIP archives.
+In a [previous article](/brute-forcing-protected-zip-rust/), we explored how to build - step by step - a CLI in Rust to brute-force protected ZIP archives.
 
 The outcome of this research was the creation of the project [zip-password-finder](https://github.com/agourlay/zip-password-finder).
 
@@ -20,7 +21,7 @@ The project `zip-password-finder` supports two different modes to find the passw
 
 It uses a channel-based architecture to distribute candidate passwords to a set of workers who are responsible for testing them in parallel.
 
-![Old architecture](/2023-04-03/old-architecture.png)
+{{ figure(src="/2023-04-03/old-architecture.png", alt="Old architecture") }}
 
 It is important to mention that ZIP archives can be encrypted using either ZipCrypto or [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard).
 
@@ -109,7 +110,7 @@ Previous measurements clearly showed that performance did not improve linearly w
 
 We previously attributed the flat line between 4 and 8 workers to the Hyper-threading on my CPU, which does not bode well for this type of workload.
 
-![Scalability](/2023-04-03/scalability.png)
+{{ figure(src="/2023-04-03/scalability.png", alt="Scalability") }}
 
 The most logical hypothesis is that there is a source of contention in the current architecture as the number of workers increases.
 
@@ -131,7 +132,7 @@ For instance, with 3 workers on a lowercase charset:
 
 This way, we remove all coordination at runtime, so the workers can make progress in isolation.
 
-![New architecture](/2023-04-03/new-architecture.png)
+{{ figure(src="/2023-04-03/new-architecture.png", alt="New architecture") }}
 
 This pattern can be elegantly integrated by refactoring the dictionary reader and password generator to be proper `Iterator`s.
 
@@ -173,7 +174,7 @@ for password in passwords_iter {
 
 Benchmarking both architectures on the `secret.zip` archive with various numbers of workers yields the following result.
 
-![New architecture effect](/2023-04-03/independent-workers-effect.png)
+{{ figure(src="/2023-04-03/independent-workers-effect.png", alt="New architecture effect") }}
 
 The performance improved slightly, but the shape of the curve did not change, meaning the scalability profile did not get any better.
 
@@ -346,7 +347,7 @@ However, the performance optimizations are hitting a wall; a single bottleneck i
 
 Each worker is busy doing the following: (full [flamegraph](/2023-04-03/final-flamegraph.svg) available).
 
-![Flamegraph worker](/2023-04-03/flamegraph-worker.png)
+{{ figure(src="/2023-04-03/flamegraph-worker.png", alt="Flamegraph worker") }}
 
 Computing the SHA1 for each candidate takes up to 90% of the total CPU time; improving this implementation would have a **massive** impact on the runtime!
 
@@ -444,7 +445,7 @@ To appreciate the performance of `zip-password-finder`, I thought it would be a 
 
 It seems **serious** people are using the [Hashcat](https://hashcat.net/hashcat/) project, which is apparently the "World's fastest password cracker"!
 
-![Hashcat logo](/2023-04-03/hashcat-logo.png)
+{{ figure(src="/2023-04-03/hashcat-logo.png", alt="Hashcat logo") }}
 
 ```bash
 sudo apt-get install hashcat

@@ -2,9 +2,9 @@
 title = "A performance retrospective using Rust (part 3)"
 description = "Third part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust."
 date = 2022-08-08
+path = "rust-performance-retrospective-part3"
 [taxonomies]
-tags=["Rust", "performance", "hprof-slurp", "try_trait"]
-categories=["series"]
+tags=["Rust", "performance", "hprof-slurp", "try_trait", "series"]
 +++
 
 This article is the third part of a performance retrospective regarding the [hprof-slurp](https://github.com/agourlay/hprof-slurp) project.
@@ -21,7 +21,7 @@ As usual, our investigation is prompted by a strange artefact in a flamegraph.
 
 Below - in purple - you can see `core::ops::try_trait::Try>::branch` represents 8.5% of the work in the parser thread (full [flamegraph](/2022-08-08/flamegraph-try-branch.svg)).
 
-![Flamegraph with try](/2022-08-08/flamegraph-try-branch.png)
+{{ figure(src="/2022-08-08/flamegraph-try-branch.png", alt="Flamegraph with try") }}
 
 You should know by now that the parser thread is the bottleneck for the whole application. It needs to be as fast as possible.
 
@@ -31,13 +31,13 @@ In this case, the slowness seemed to be caused by the `Try` trait, which does no
 
 Our best chance is to simply look at the Rust doc for the [branch](https://doc.rust-lang.org/stable/core/ops/trait.Try.html#tymethod.branch) method.
 
-![Try::branch docs](/2022-08-08/branch-doc.png)
+{{ figure(src="/2022-08-08/branch-doc.png", alt="Try::branch docs") }}
 
 Alright, so this function is a 'nightly-only experimental' API and is called every time the operator `?` is used on something that implements the `Try` trait.
 
 The only possible implementations when using stable Rust are found in the standard library.
 
-![Try implementor docs](/2022-08-08/try-implementors.png)
+{{ figure(src="/2022-08-08/try-implementors.png", alt="Try implementor docs") }}
 
 In our case the culprit must be the `Result` type which is used to track the errors occurring during the parsing phase.
 
@@ -133,11 +133,11 @@ And a second change using `Result::map`:
 
 After applying those two changes, we can indeed see that `core::ops::try_trait::Try>::branch` now represents only 0.5% of time in a different call stack.
 
-![Flamegraph after fix](/2022-08-08/flamegraph-after-fix.png)
+{{ figure(src="/2022-08-08/flamegraph-after-fix.png", alt="Flamegraph after fix") }}
 
 Most of it now comes from `nom::combinator::flat_map` and when zooming in we can also find a tiny contribution from `nom::combinator::map`.
 
-![Flamegraph after fix zoom](/2022-08-08/flamegraph-after-fix-extra.png)
+{{ figure(src="/2022-08-08/flamegraph-after-fix-extra.png", alt="Flamegraph after fix zoom") }}
 
 The previous occurrence of `core::ops::try_trait::Try>::branch` has been replaced by `Result::map` which informs us that our second change is executed more often.
 
@@ -244,4 +244,4 @@ It seems reasonable to believe that this behaviour should not be an issue for th
 
 As always, it is good to benchmark instead of making assumptions, which could lead to making the code less readable without concrete gains.
 
-The next article in this [series](/categories/series/) will go through another interesting optimization encountered while making `hprof-slurp` faster.
+The next article in this [series](/tags/series/) will go through another interesting optimization encountered while making `hprof-slurp` faster.

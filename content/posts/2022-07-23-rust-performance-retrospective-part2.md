@@ -2,9 +2,9 @@
 title = "A performance retrospective using Rust (part 2)"
 description = "Second part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust."
 date = 2022-07-23
+path = "rust-performance-retrospective-part2"
 [taxonomies]
-tags=["Rust", "performance", "hprof-slurp", "memcopy"]
-categories=["series"]
+tags=["Rust", "performance", "hprof-slurp", "memcopy", "series"]
 +++
 
 This article is the second part of a performance retrospective regarding the [hprof-slurp](https://github.com/agourlay/hprof-slurp) project. It is highly recommended to start with the [first part](/rust-performance-retrospective-part1/) to get a good grasp of the context.
@@ -19,14 +19,16 @@ As the program got faster, I witnessed the `memcpy` instructions slowly creeping
 
 Below - in purple - you can see the `_memcpy_avx_unaligned_erms` representing most of the work in the parser thread (full [flamegraph](/2022-07-23/flamegraph-0.3.3.svg)).
 
-![Flamegraph with memcopy](/2022-07-23/flamegraph-memcopy.png)
+{{ figure(src="/2022-07-23/flamegraph-memcopy.png", alt="Flamegraph with memcopy") }}
 
 At first, I thought it was an inherent cost of parsing large files, but as it grew to become the largest bottleneck in `hprof-slurp`, I decided to investigate the issue to - at the very least - understand it.
 
 I found the answer to this mystery in the fantastic [Rust performance book](https://nnethercote.github.io/perf-book/type-sizes.html).
 
-> Rust types that are larger than 128 bytes are copied with memcpy rather than inline code.
-> Shrinking these types to 128 bytes or less can make the code faster by avoiding memcpy calls and reducing memory traffic.
+{% quote(cite="Rust performance book") %}
+Rust types that are larger than 128 bytes are copied with memcpy rather than inline code.
+Shrinking these types to 128 bytes or less can make the code faster by avoiding memcpy calls and reducing memory traffic.
+{% end %}
 
 Therefore, within my code I needed to find the large types that are used very often on the parser's path.
 
@@ -209,7 +211,7 @@ Ouch! It is over three times slower!
 
 Let's have a look at the flamegraph to understand where the CPU spends its time.
 
-![Flamegraph with boxing](/2022-07-23/flamegraph-box.png)
+{{ figure(src="/2022-07-23/flamegraph-box.png", alt="Flamegraph with boxing") }}
 
 In purple, you can see the cost of `Box::new` in the parser thread (full [flamegraph](/2022-07-23/flamegraph-box.svg) available).
 
@@ -393,7 +395,9 @@ It is called [large_enum_variant](https://rust-lang.github.io/rust-clippy/master
 
 The documentation warns us about something very important that we discovered as well.
 
-> This lint obviously cannot take the distribution of variants in your running program into account. It is possible that the smaller variants make up less than 1% of all instances, in which case the overhead is negligible and the boxing is counter-productive. Always measure the change this lint suggests.
+{% warning(title="Warning") %}
+This lint obviously cannot take the distribution of variants in your running program into account. It is possible that the smaller variants make up less than 1% of all instances, in which case the overhead is negligible and the boxing is counter-productive. Always measure the change this lint suggests.
+{% end %}
 
 Let's give this lint a try by creating a `clippy.toml` file in the project and configuring this lint to be more aggressive with:
 
@@ -482,6 +486,8 @@ As a rule of thumb, it is recommended to avoid single outsized variants when cre
 
 One also must be careful when trying to reduce the stack memory pressure via boxing. Allocating on the heap is not magic, and its cost must be understood in the context of the application.
 
-The next article in this [series](/categories/series/) will go through another interesting optimization encountered while making `hprof-slurp` faster.
+The next article in this [series](/tags/series/) will go through another interesting optimization encountered while making `hprof-slurp` faster.
 
-**_Update: the article submission on [reddit/r/rust](https://www.reddit.com/r/rust/comments/w7pelk/a_performance_retrospective_using_rust_part_2/) contains excellent comments._**
+{% note(title="Update") %}
+The article submission on [reddit/r/rust](https://www.reddit.com/r/rust/comments/w7pelk/a_performance_retrospective_using_rust_part_2/) contains excellent comments.
+{% end %}

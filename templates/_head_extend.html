@@ -1,0 +1,23 @@
+<style>
+  /* Avatar: crop to fill the circle instead of distorting a non-square image */
+  #info img { object-fit: cover; object-position: center 22%; }
+  /* Footer: stack the copyright and sponsor lines instead of running them together
+     (Serene's `footer .left` is a flex row, meant for a single line) */
+  footer .left { flex-direction: column; align-items: flex-start; gap: 3px; }
+  /* Float the footer controls (RSS + theme toggle) to a fixed top-right cluster so
+     they're visible on landing without scrolling. Same elements, so main.js still works. */
+  footer .right {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    z-index: 50;
+    margin: 0;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 10px;
+    background: rgba(128, 128, 128, 0.12);
+  }
+  footer .right:hover { background: rgba(128, 128, 128, 0.20); }
+  footer .right #theme-toggle { transform: none; }
+</style>
