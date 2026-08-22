@@ -3,7 +3,7 @@ base_url = "https://agourlay.github.io"
 title = "Arnaud Gourlay's blog"
 description = "Yet another programming blog"
 
-generate_feed = true
+generate_feeds = true
 
 compile_sass = true
 
@@ -17,7 +17,9 @@ taxonomies = [
 ]
 
 [markdown]
-highlight_code = true
+
+[markdown.highlighting]
+theme = "material-theme-ocean"
 
 [extra]
 anpu_menu_links = [
