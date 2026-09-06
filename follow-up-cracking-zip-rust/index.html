@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  
+    
+  <meta name="description" content="Progress report on zip-password-finder">
+<link rel="canonical" href="https://agourlay.github.io/follow-up-cracking-zip-rust/">
+<meta property="og:site_name" content="Arnaud Gourlay&#x27;s blog">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Follow up on cracking ZIP archives in Rust">
+<meta property="og:description" content="Progress report on zip-password-finder">
+<meta property="og:url" content="https://agourlay.github.io/follow-up-cracking-zip-rust/">
+<meta property="og:locale" content="en">
+
+
+<meta property="article:published_time" content="2023-04-03">
+
+<meta property="article:tag" content="Rust">
+<meta property="article:tag" content="security">
+<meta property="article:tag" content="multithreading">
+<meta property="article:tag" content="benchmarking">
+
+
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Follow up on cracking ZIP archives in Rust">
+<meta name="twitter:description" content="Progress report on zip-password-finder">
+
+
+
+  <title>Follow up on cracking ZIP archives in Rust</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="https://agourlay.github.io/img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://agourlay.github.io/img/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://agourlay.github.io/img/apple-touch-icon.png">
+  
+  <style>
+
+  /* light mode colors */
+  body {
+    --primary-color: #5871a2;
+    --primary-pale-color: #5871a233;
+    --primary-decoration-color: #5871a210;
+    --bg-color: #ffffff;
+    --text-color: #2f3030;
+    --text-pale-color: #767676;
+    --text-decoration-color: #a9a9a9;
+    --highlight-mark-color: #5f75b020;
+
+    --callout-note-color: #5871a2;
+    --callout-tip-color: #268556;
+    --callout-important-color: #885fc9;
+    --callout-warning-color: #ab6632;
+    --callout-caution-color: #c64e4e;
+  }
+
+  /* dark mode colors */
+  body.dark {
+    --primary-color: #6f8fd1;
+    --primary-pale-color: #6f8fd166;
+    --primary-decoration-color: #6f8fd112;
+    --bg-color: #1c1c1c;
+    --text-color: #c1c1c1;
+    --text-pale-color: #848484;
+    --text-decoration-color: #5f5f5f;
+    --highlight-mark-color: #8296cb3b;
+
+    --callout-note-color: #6f8fd1;
+    --callout-tip-color: #47976f;
+    --callout-important-color: #9776cd;
+    --callout-warning-color: #ad7a52;
+    --callout-caution-color: #d06161;
+  }
+
+  /* typography */
+  body {
+    --main-font: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --code-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    --homepage-max-width: 768px;
+    --main-max-width: 768px;
+    --avatar-size: 60px;
+    --font-size: 16px;
+    --line-height: 1.75;
+    --img-border-radius: 0px;
+    --detail-border-radius: 0px;
+    --dark-mode-img-brightness: 0.75;
+    --dark-mode-chart-brightness: 0.75;
+    --inline-code-border-radius: 2px;
+    --inline-code-bg-color: var(--primary-decoration-color);
+    --block-code-border-radius: 0px;
+    --block-code-border-color: var(--primary-color);
+    --detail-border-color: var(--primary-color);
+  }
+
+</style>
+
+  <link rel="stylesheet" href="https://agourlay.github.io/main.css">
+  
+
+<link id="hl" rel="stylesheet" type="text/css" href="/giallo-light.css" />
+
+
+
+  <style>
+  /* Avatar: crop to fill the circle instead of distorting a non-square image */
+  #info img { object-fit: cover; object-position: center 22%; }
+  /* Footer: stack the copyright and sponsor lines instead of running them together
+     (Serene's `footer .left` is a flex row, meant for a single line) */
+  footer .left { flex-direction: column; align-items: flex-start; gap: 3px; }
+  /* Float the footer controls (RSS + theme toggle) to a fixed top-right cluster so
+     they're visible on landing without scrolling. Same elements, so main.js still works. */
+  footer .right {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    z-index: 50;
+    margin: 0;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 10px;
+    background: rgba(128, 128, 128, 0.12);
+  }
+  footer .right:hover { background: rgba(128, 128, 128, 0.20); }
+  footer .right #theme-toggle { transform: none; }
+</style>
+
+</head>
+
+<body class="post">
+  
+  <script>
+    const theme = sessionStorage.getItem('theme');
+    const match = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if ((theme && theme == 'dark') || (!theme && match)) {
+      document.body.classList.add('dark');
+      const hl = document.querySelector('link#hl');
+      if (hl) hl.href = 'https://agourlay.github.io/giallo-dark.css';
+    }
+  </script>
+  
+  
+<div id="wrapper">
+  <div id="blank"></div>
+  <aside>
+    
+    
+    <nav>
+      <ul>
+        
+        <li>
+          <a class="h2" href="#a-short-recap">A short recap</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#test-drive">Test drive</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#independent-workers">Independent workers</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#cheaper-iteration">Cheaper iteration</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#performance-over-time">Performance over time</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#optimizing-build">Optimizing build</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#state-of-the-art">State of the art</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#future-work">Future work</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#conclusion">Conclusion</a>
+          
+        </li>
+        
+      </ul>
+    </nav>
+    
+    
+    <button id="back-to-top" aria-label="back to top">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-arrow-up"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+
+    </button>
+    
+  </aside>
+  <main>
+    
+<header>
+  <nav>
+    <a id="back-link" href="https:&#x2F;&#x2F;agourlay.github.io&#x2F;posts">← Back</a>
+  </nav>
+</header>
+
+
+    <div>
+      
+      
+      
+      
+      <div id="copy-cfg" style="display: none;" data-copy-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M6.9998 6V3C6.9998 2.44772 7.44752 2 7.9998 2H19.9998C20.5521 2 20.9998 2.44772 20.9998 3V17C20.9998 17.5523 20.5521 18 19.9998 18H16.9998V20.9991C16.9998 21.5519 16.5499 22 15.993 22H4.00666C3.45059 22 3 21.5554 3 20.9991L3.0026 7.00087C3.0027 6.44811 3.45264 6 4.00942 6H6.9998ZM5.00242 8L5.00019 20H14.9998V8H5.00242ZM8.9998 6H16.9998V16H18.9998V4H8.9998V6Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+" data-check-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M10.0007 15.1709L19.1931 5.97852L20.6073 7.39273L10.0007 17.9993L3.63672 11.6354L5.05093 10.2212L10.0007 15.1709Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+"></div>
+      
+      <article class="prose">
+        <h1>Follow up on cracking ZIP archives in Rust</h1>
+        <div id="post-info">
+          <div id="date">
+            <span id="publish"> 3 April 2023</span>
+            </div>
+
+          
+          <div id="tags">
+            <a class="instant" href="https://agourlay.github.io/tags/rust"><span>#</span>Rust</a><a class="instant" href="https://agourlay.github.io/tags/security"><span>#</span>security</a><a class="instant" href="https://agourlay.github.io/tags/multithreading"><span>#</span>multithreading</a><a class="instant" href="https://agourlay.github.io/tags/benchmarking"><span>#</span>benchmarking</a>
+          </div>
+          
+        </div>
+
+        
+        
+
+        
+
+        <p>In a <a href="/brute-forcing-protected-zip-rust/">previous article</a>, we explored how to build - step by step - a CLI in Rust to brute-force protected ZIP archives.</p>
+<p>The outcome of this research was the creation of the project <a rel="nofollow noreferrer external" href="https://github.com/agourlay/zip-password-finder">zip-password-finder</a>.</p>
+<p>Since the last publication, the project has been slowly evolving to mitigate the shortcomings that were highlighted.</p>
+<p>In this follow-up entry we will go over the improvements made and the latest performance numbers.</p>
+<h2 id="a-short-recap">A short recap<a class="zola-anchor" href="#a-short-recap" aria-label="Anchor link for: a-short-recap" style="visibility: hidden;"></a>
+</h2>
+<p>The project <code>zip-password-finder</code> supports two different modes to find the password: either from a dictionary file or by generating candidates from a charset.</p>
+<p>It uses a channel-based architecture to distribute candidate passwords to a set of workers who are responsible for testing them in parallel.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2023-04-03&#x2F;old-architecture.png"
+         alt="Old architecture"
+        
+        
+    >
+    
+</figure>
+<p>It is important to mention that ZIP archives can be encrypted using either ZipCrypto or <a rel="nofollow noreferrer external" href="https://en.wikipedia.org/wiki/Advanced_Encryption_Standard">AES</a>.</p>
+<p>In practice, ZipCrypto can be <a rel="nofollow noreferrer external" href="https://blog.devolutions.net/2020/08/why-you-should-never-use-zipcrypto/">attacked</a> and is much cheaper to brute force.</p>
+<p>As it can still be found in the wild, most notably produced by Windows machines, <code>zip-password-finder</code> handles this format transparently for the user.</p>
+<p>However, we won't give it much thought in this article given its issues and our desire to focus on the more difficult AES case.</p>
+<h2 id="test-drive">Test drive<a class="zola-anchor" href="#test-drive" aria-label="Anchor link for: test-drive" style="visibility: hidden;"></a>
+</h2>
+<p>Here is the CLI we are going to work with.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">./zip-password-finder</span><span class="z-constant"> -</span><span class="z-constant">h</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Find</span><span class="z-string"> the</span><span class="z-string"> password</span><span class="z-string"> of</span><span class="z-string"> protected</span><span class="z-string"> ZIP</span><span class="z-string"> files</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Usage:</span><span class="z-string"> zip-password-finder</span><span> [OPTIONS</span><span>] --inputFile </span><span class="z-keyword">&lt;</span><span>inputFile</span><span class="z-keyword">&gt;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Options:</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  -i,</span><span class="z-constant"> -</span><span class="z-constant">-inputFile</span><span class="z-keyword"> &lt;</span><span class="z-string">inputFil</span><span>e</span><span class="z-keyword">&gt;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">          path</span><span class="z-string"> to</span><span class="z-string"> zip</span><span class="z-string"> input</span><span class="z-string"> file</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  -w,</span><span class="z-constant"> -</span><span class="z-constant">-workers</span><span class="z-keyword"> &lt;</span><span class="z-string">worker</span><span>s</span><span class="z-keyword">&gt;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">          number</span><span class="z-string"> of</span><span class="z-string"> workers</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  -p,</span><span class="z-constant"> -</span><span class="z-constant">-passwordDictionary</span><span class="z-keyword"> &lt;</span><span class="z-string">passwordDictionar</span><span>y</span><span class="z-keyword">&gt;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">          path</span><span class="z-string"> to</span><span class="z-string"> a</span><span class="z-string"> password</span><span class="z-string"> dictionary</span><span class="z-string"> file</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  -c,</span><span class="z-constant"> -</span><span class="z-constant">-charset</span><span class="z-keyword"> &lt;</span><span class="z-string">charse</span><span>t</span><span class="z-keyword">&gt;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">          charset</span><span class="z-string"> to</span><span class="z-string"> use</span><span class="z-string"> to</span><span class="z-string"> generate</span><span class="z-string"> password</span><span> [default:</span><span class="z-string"> medium]</span><span> [possible</span><span class="z-string"> values:</span><span class="z-string"> basic,</span><span class="z-string"> easy,</span><span class="z-string"> medium,</span><span class="z-string"> hard]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">      --minPasswordLen</span><span class="z-keyword"> &lt;</span><span class="z-string">minPasswordLe</span><span>n</span><span class="z-keyword">&gt;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">          minimum</span><span class="z-string"> password</span><span class="z-string"> length</span><span> [default:</span><span class="z-string"> 1]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">      --maxPasswordLen</span><span class="z-keyword"> &lt;</span><span class="z-string">maxPasswordLe</span><span>n</span><span class="z-keyword">&gt;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">          maximum</span><span class="z-string"> password</span><span class="z-string"> length</span><span> [default:</span><span class="z-string"> 10]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  -h,</span><span class="z-constant"> -</span><span class="z-constant">-help</span></span>
+<span class="giallo-l"><span class="z-entity z-name">          Print</span><span class="z-string"> help</span><span class="z-string"> information</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  -V,</span><span class="z-constant"> -</span><span class="z-constant">-version</span></span>
+<span class="giallo-l"><span class="z-entity z-name">          Print</span><span class="z-string"> version</span><span class="z-string"> information</span></span></code></pre>
+<p>We can give it a try by creating an encrypted zip archive; let's call it <code>secret.zip</code> with the four-character password <code>"ab12"</code>.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">zipinfo</span><span class="z-string"> secret.zip</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Archive:</span><span class="z-string">  secret.zip</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Zip</span><span class="z-string"> file</span><span class="z-string"> size:</span><span class="z-constant"> 209</span><span class="z-string"> bytes,</span><span class="z-string"> number</span><span class="z-string"> of</span><span class="z-string"> entries:</span><span class="z-constant"> 1</span></span>
+<span class="giallo-l"><span class="z-entity z-name">-rw-rw-r--</span><span class="z-constant">  6.3</span><span class="z-string"> unx</span><span class="z-constant">       13</span><span class="z-string"> Bx</span><span class="z-string"> u099</span><span class="z-string"> 23-Mar-27</span><span class="z-string"> 20:17</span><span class="z-string"> secret.txt</span></span>
+<span class="giallo-l"><span class="z-entity z-name">1</span><span class="z-string"> file,</span><span class="z-constant"> 13</span><span class="z-string"> bytes</span><span class="z-string"> uncompressed,</span><span class="z-constant"> 21</span><span class="z-string"> bytes</span><span class="z-string"> compressed:</span><span class="z-constant">  -</span><span class="z-constant">61.5%</span></span></code></pre>
+<p>Given that the password is pretty short, we can ask <code>zip-password-finder</code> to generate all possible passwords from the charset formed by the lowercase letters, uppercase letters, and digits (called medium).</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-keyword">time</span><span> ./zip-password-finder -i test-encrypted.zip --charset medium</span></span></code></pre>
+<p>It returns with the right answer shortly before the one-minute mark.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-keyword">time</span><span> ./zip-password-finder-0.2 -i </span><span class="z-keyword">~</span><span>/Workspace/blog-data/find-password-zip/secret.zip -c medium</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Using</span><span class="z-constant"> 4</span><span class="z-string"> workers</span><span class="z-string"> to</span><span class="z-string"> test</span><span class="z-string"> passwords</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Generating</span><span class="z-string"> passwords</span><span class="z-string"> with</span><span class="z-string"> length</span><span class="z-string"> from</span><span class="z-constant"> 1</span><span class="z-string"> to</span><span class="z-constant"> 10</span><span class="z-string"> for</span><span class="z-string"> charset</span><span class="z-string"> with</span><span class="z-string"> length</span><span class="z-constant"> 62</span></span>
+<span class="giallo-l"><span>[</span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">a</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">b</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">c</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">d</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">e</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">f</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">g</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">h</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">i</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">j</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">k</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">l</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">m</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">n</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">o</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">p</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">q</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">r</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">s</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">t</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">u</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">v</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">w</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">x</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">y</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">z</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">A</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">B</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">C</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">D</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">E</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">F</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">G</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">H</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">I</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">J</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">K</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">L</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">M</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">N</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">O</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">P</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">Q</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">R</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">S</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">T</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">U</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">V</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">W</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">X</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">Y</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">Z</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">0</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">1</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">2</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">3</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">4</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">5</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">6</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">7</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">8</span><span class="z-punctuation z-definition z-string">&#39;</span><span>, </span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">9</span><span class="z-punctuation z-definition z-string">&#39;</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Starting</span><span class="z-string"> search</span><span class="z-string"> space</span><span class="z-string"> for</span><span class="z-string"> password</span><span class="z-string"> length</span><span class="z-constant"> 1</span><span> (62</span><span class="z-string"> possibilities</span><span>) </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Starting</span><span class="z-string"> search</span><span class="z-string"> space</span><span class="z-string"> for</span><span class="z-string"> password</span><span class="z-string"> length</span><span class="z-constant"> 2</span><span> (3844</span><span class="z-string"> possibilities</span><span>) (</span><span class="z-entity z-name">61</span><span class="z-string"> passwords</span><span class="z-string"> generated</span><span class="z-string"> so</span><span class="z-string"> far</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Starting</span><span class="z-string"> search</span><span class="z-string"> space</span><span class="z-string"> for</span><span class="z-string"> password</span><span class="z-string"> length</span><span class="z-constant"> 3</span><span> (238328</span><span class="z-string"> possibilities</span><span>) (</span><span class="z-entity z-name">3905</span><span class="z-string"> passwords</span><span class="z-string"> generated</span><span class="z-string"> so</span><span class="z-string"> far</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Starting</span><span class="z-string"> search</span><span class="z-string"> space</span><span class="z-string"> for</span><span class="z-string"> password</span><span class="z-string"> length</span><span class="z-constant"> 4</span><span> (14776336</span><span class="z-string"> possibilities</span><span>) (</span><span class="z-entity z-name">242233</span><span class="z-string"> passwords</span><span class="z-string"> generated</span><span class="z-string"> so</span><span class="z-string"> far</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Password</span><span class="z-string"> found</span><span class="z-punctuation z-definition z-string"> &#39;</span><span class="z-string">ab12</span><span class="z-punctuation z-definition z-string">&#39;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">real</span><span class="z-string"> 0m54,262s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">user</span><span class="z-string"> 3m40,620s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">sys</span><span class="z-string">  0m2,431s</span></span></code></pre>
+<p>Finding a 4-letter password on such a small charset was a rather easy task for a modern CPU.</p>
+<p>There are only <code>(26 lower + 26 upper + 10 digit)^4 = 14.776.336</code> candidates to test.</p>
+<p>However, a learning from the previous article is that scalability suffers as the number of workers increases.</p>
+<p>Improving on this limitation is critical for being able to work against real-world passwords.</p>
+<p>We will reuse this test file for the benchmarks in the rest of the article.</p>
+<h2 id="independent-workers">Independent workers<a class="zola-anchor" href="#independent-workers" aria-label="Anchor link for: independent-workers" style="visibility: hidden;"></a>
+</h2>
+<p>Previous measurements clearly showed that performance did not improve linearly with the number of workers.</p>
+<p>We previously attributed the flat line between 4 and 8 workers to the Hyper-threading on my CPU, which does not bode well for this type of workload.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2023-04-03&#x2F;scalability.png"
+         alt="Scalability"
+        
+        
+    >
+    
+</figure>
+<p>The most logical hypothesis is that there is a source of contention in the current architecture as the number of workers increases.</p>
+<p>It seems straightforward to believe that workers are somehow competing and synchronizing with each other to poll candidates from the channel.</p>
+<p>Picking an easy architecture helped us get started at the beginning, but it could very well be a limiting factor to get faster.</p>
+<p>An interesting insight is that workers do not need to share the same source of passwords.</p>
+<p>Each worker could agree upfront to work on a subset of the generated passwords.</p>
+<p>Given n workers, each worker generates and tests <code>1/n</code> of the passwords with an offset.</p>
+<p>For instance, with 3 workers on a lowercase charset:</p>
+<ul>
+<li>first worker : "a", "d", "g", "j", ...</li>
+<li>second worker: "b", "e", "h", "k", ...</li>
+<li>third worker : "c", "f", "i", "l", ...</li>
+</ul>
+<p>This way, we remove all coordination at runtime, so the workers can make progress in isolation.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2023-04-03&#x2F;new-architecture.png"
+         alt="New architecture"
+        
+        
+    >
+    
+</figure>
+<p>This pattern can be elegantly integrated by refactoring the dictionary reader and password generator to be proper <code>Iterator</code>s.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> passwords_iter</span><span class="z-keyword">:</span><span class="z-entity z-name"> Box</span><span>&lt;</span><span class="z-keyword">dyn</span><span class="z-entity z-name"> Iterator</span><span>&lt;</span><span class="z-entity z-name">Item</span><span class="z-keyword"> =</span><span class="z-entity z-name"> String</span><span>&gt;</span><span>&gt;</span><span class="z-keyword"> =</span><span class="z-keyword"> match</span><span class="z-variable z-other"> strategy</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Strategy</span><span class="z-keyword">::</span><span class="z-entity z-name">GenPasswords</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        charset</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        min_password_len</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        max_password_len</span><span>,</span></span>
+<span class="giallo-l"><span>    }</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">        let</span><span class="z-variable z-other"> iterator</span><span class="z-keyword"> =</span><span class="z-entity z-name"> password_generator_iter</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-variable z-other">charset</span><span>,</span><span class="z-variable z-other"> min_password_len</span><span>,</span><span class="z-variable z-other"> max_password_len</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        Box</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">iterator</span><span>)</span></span>
+<span class="giallo-l"><span>    }</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Strategy</span><span class="z-keyword">::</span><span class="z-entity z-name">PasswordFile</span><span>(</span><span class="z-variable z-other">dictionary_path</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">        let</span><span class="z-variable z-other"> iterator</span><span class="z-keyword"> =</span><span class="z-entity z-name"> password_dictionary_reader_iter</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-variable z-other">dictionary_path</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        Box</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">iterator</span><span>)</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>}</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> filtering iterator for worker `worker_index`</span></span>
+<span class="giallo-l"><span class="z-variable z-other">passwords_iter</span><span class="z-keyword"> =</span><span class="z-keyword"> if</span><span class="z-variable z-other"> worker_count</span><span class="z-keyword"> &gt;</span><span class="z-constant"> 1</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> filtered</span><span class="z-keyword"> =</span><span class="z-variable z-other"> passwords_iter</span><span class="z-keyword">.</span><span class="z-entity z-name">enumerate</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">filter_map</span><span>(</span><span class="z-keyword">move</span><span class="z-keyword"> |</span><span>(</span><span class="z-variable z-other">i</span><span>,</span><span class="z-variable z-other"> candidate</span><span>)</span><span class="z-keyword">|</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">        if</span><span class="z-variable z-other"> i</span><span class="z-keyword"> %</span><span class="z-variable z-other"> worker_count</span><span class="z-keyword"> ==</span><span class="z-variable z-other"> worker_index</span><span class="z-keyword"> -</span><span class="z-constant"> 1</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">            Some</span><span>(</span><span class="z-variable z-other">candidate</span><span>)</span></span>
+<span class="giallo-l"><span>        }</span><span class="z-keyword"> else</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">            None</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    }</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Box</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">filtered</span><span>)</span></span>
+<span class="giallo-l"><span>}</span><span class="z-keyword"> else</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    passwords_iter</span></span>
+<span class="giallo-l"><span>}</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> processing loop</span></span>
+<span class="giallo-l"><span class="z-keyword">for</span><span class="z-variable z-other"> password</span><span class="z-keyword"> in</span><span class="z-variable z-other"> passwords_iter</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">    ...</span><span>        </span></span>
+<span class="giallo-l"><span>}</span><span>   </span></span></code></pre>
+<p>Benchmarking both architectures on the <code>secret.zip</code> archive with various numbers of workers yields the following result.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2023-04-03&#x2F;independent-workers-effect.png"
+         alt="New architecture effect"
+        
+        
+    >
+    
+</figure>
+<p>The performance improved slightly, but the shape of the curve did not change, meaning the scalability profile did not get any better.</p>
+<p>Switching to independent workers is beneficial, but it did not have the desired effect.</p>
+<p>There is more research to be done to improve scalability.</p>
+<h2 id="cheaper-iteration">Cheaper iteration<a class="zola-anchor" href="#cheaper-iteration" aria-label="Anchor link for: cheaper-iteration" style="visibility: hidden;"></a>
+</h2>
+<p>One obvious strategy to go faster is to make testing a candidate as cheap as possible.</p>
+<p>The first version of the project was rather naive in that regard.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> archive</span><span class="z-keyword"> =</span><span class="z-entity z-name"> zip</span><span class="z-keyword">::</span><span class="z-entity z-name">ZipArchive</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">file</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">expect</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">Archive validated before-hand</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">loop</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">    match</span><span class="z-variable z-other"> receive_password</span><span class="z-keyword">.</span><span class="z-entity z-name">recv</span><span>(</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        Err</span><span>(</span><span class="z-variable z-other">_</span><span>)</span><span class="z-keyword"> =&gt;</span><span class="z-keyword"> break</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        Ok</span><span>(</span><span class="z-variable z-other">password</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">            let</span><span class="z-variable z-other"> res</span><span class="z-keyword"> =</span><span class="z-variable z-other"> archive</span><span class="z-keyword">.</span><span class="z-entity z-name">by_index_decrypt</span><span>(</span><span class="z-constant">0</span><span>,</span><span class="z-variable z-other"> password</span><span class="z-keyword">.</span><span class="z-entity z-name">as_bytes</span><span>(</span><span>)</span><span>)</span><span>;</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> decrypt first file in archive</span></span>
+<span class="giallo-l"><span class="z-keyword">            match</span><span class="z-variable z-other"> res</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                Err</span><span>(</span><span class="z-variable z-other">e</span><span>)</span><span class="z-keyword"> =&gt;</span><span class="z-entity z-name"> panic!</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">Unexpected error </span><span class="z-string">{</span><span class="z-string">:?</span><span class="z-string">}</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-variable z-other"> e</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                Ok</span><span>(</span><span class="z-entity z-name">Err</span><span>(</span><span class="z-variable z-other">_</span><span>)</span><span>)</span><span class="z-keyword"> =&gt;</span><span> (</span><span>)</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> invalid password - continue</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                Ok</span><span>(</span><span class="z-entity z-name">Ok</span><span>(</span><span class="z-variable z-other">_</span><span>)</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                    println!</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">Password found:</span><span class="z-string">{</span><span class="z-string">}</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-variable z-other"> password</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">                    break</span><span>;</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> stop thread</span></span>
+<span class="giallo-l"><span>                }</span></span>
+<span class="giallo-l"><span>            }</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>For each candidate, the function <code>archive.by_index_decrypt(0, password)</code> is called; hopefully it does not do too much.</p>
+<p>This function belongs to the <code>zip-rs</code> project and performs the following actions:</p>
+<ol>
+<li>Find file data in the archive based on file index used (here 0).</li>
+<li>Verify that the file is encrypted.</li>
+<li>Load raw content of the file.</li>
+<li>Prepare AES decoder (get salt &amp; verification key).</li>
+<li>Compute key for candidate and salt.</li>
+<li>Compare derived key to verification key.</li>
+</ol>
+<p>Well, that is a <strong>lot</strong> of repetition!</p>
+<p>Ideally, we just want to perform the 5th and 6th steps for each candidate, the rest can be pre-computed.</p>
+<p>To do this, I had to fork the <code>zip-rs</code> crate to expose some internals.</p>
+<p>On the <code>AesReader</code>:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-punctuation z-definition z-comment">///</span><span class="z-comment"> Read the AES header bytes and returns the key and salt.</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">///</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">///</span><span class="z-comment"> # Returns</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">///</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">///</span><span class="z-comment"> the key and the salt</span></span>
+<span class="giallo-l"><span class="z-keyword">pub</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> get_key_and_salt</span><span>(</span><span class="z-storage">mut</span><span class="z-variable z-language"> self</span><span>)</span><span class="z-keyword"> -&gt;</span><span class="z-entity z-name"> io</span><span class="z-keyword">::</span><span class="z-entity z-name">Result</span><span>&lt;</span><span>(</span><span class="z-entity z-name">Vec</span><span>&lt;</span><span class="z-entity z-name">u8</span><span>&gt;</span><span>,</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">u8</span><span>&gt;</span><span>)</span><span>&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> salt_length</span><span class="z-keyword"> =</span><span class="z-variable z-language"> self</span><span class="z-keyword">.</span><span>aes_mode</span><span class="z-keyword">.</span><span class="z-entity z-name">salt_length</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> salt</span><span class="z-keyword"> =</span><span class="z-entity z-name"> vec!</span><span>[</span><span class="z-constant">0</span><span>;</span><span class="z-variable z-other"> salt_length</span><span>]</span><span>;</span></span>
+<span class="giallo-l"><span class="z-variable z-language">    self</span><span class="z-keyword">.</span><span>reader</span><span class="z-keyword">.</span><span class="z-entity z-name">read_exact</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-storage">mut</span><span class="z-variable z-other"> salt</span><span>)</span><span class="z-keyword">?</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> next are 2 bytes used for password verification</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> pwd_verification_value</span><span class="z-keyword"> =</span><span class="z-entity z-name"> vec!</span><span>[</span><span class="z-constant">0</span><span>;</span><span class="z-constant"> PWD_VERIFY_LENGTH</span><span>]</span><span>;</span></span>
+<span class="giallo-l"><span class="z-variable z-language">    self</span><span class="z-keyword">.</span><span>reader</span><span class="z-keyword">.</span><span class="z-entity z-name">read_exact</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-storage">mut</span><span class="z-variable z-other"> pwd_verification_value</span><span>)</span><span class="z-keyword">?</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Ok</span><span>(</span><span>(</span><span class="z-variable z-other">pwd_verification_value</span><span>,</span><span class="z-variable z-other"> salt</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>And on the <code>ZipArchiveReader</code>:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-punctuation z-definition z-comment">///</span><span class="z-comment"> Returns key and salt</span></span>
+<span class="giallo-l"><span class="z-keyword">pub</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> get_aes_key_and_salt</span><span>(</span></span>
+<span class="giallo-l"><span class="z-keyword">    &amp;</span><span class="z-storage">mut</span><span class="z-variable z-language"> self</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    file_number</span><span class="z-keyword">:</span><span class="z-entity z-name"> usize</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span class="z-keyword"> -&gt;</span><span class="z-entity z-name"> ZipResult</span><span>&lt;</span><span class="z-entity z-name">Option</span><span>&lt;</span><span>(</span><span class="z-entity z-name">AesMode</span><span>,</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">u8</span><span>&gt;</span><span>,</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">u8</span><span>&gt;</span><span>)</span><span>&gt;</span><span>&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> data</span><span class="z-keyword"> =</span><span class="z-variable z-language"> self</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span>shared</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span>files</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">get</span><span>(</span><span class="z-variable z-other">file_number</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">ok_or</span><span>(</span><span class="z-entity z-name">ZipError</span><span class="z-keyword">::</span><span class="z-entity z-name">FileNotFound</span><span>)</span><span class="z-keyword">?</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-keyword">    if</span><span class="z-keyword"> !</span><span class="z-variable z-other">data</span><span class="z-keyword">.</span><span>encrypted </span><span>{</span></span>
+<span class="giallo-l"><span class="z-keyword">        return</span><span class="z-entity z-name"> Err</span><span>(</span><span class="z-entity z-name">ZipError</span><span class="z-keyword">::</span><span class="z-entity z-name">UnsupportedArchive</span><span>(</span><span class="z-entity z-name">ZipError</span><span class="z-keyword">::</span><span class="z-constant">PASSWORD_REQUIRED</span><span>)</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> limit_reader</span><span class="z-keyword"> =</span><span class="z-entity z-name"> find_content</span><span>(</span><span class="z-variable z-other">data</span><span>,</span><span class="z-keyword"> &amp;</span><span class="z-storage">mut</span><span class="z-variable z-language"> self</span><span class="z-keyword">.</span><span>reader</span><span>)</span><span class="z-keyword">?</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">    match</span><span class="z-variable z-other"> data</span><span class="z-keyword">.</span><span>aes_mode </span><span>{</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        None</span><span class="z-keyword"> =&gt;</span><span class="z-entity z-name"> Ok</span><span>(</span><span class="z-entity z-name">None</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        Some</span><span>(</span><span>(</span><span class="z-variable z-other">aes_mode</span><span>,</span><span class="z-variable z-other"> _</span><span>)</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">            let</span><span> (</span><span class="z-variable z-other">key</span><span>,</span><span class="z-variable z-other"> salt</span><span>)</span><span class="z-keyword"> =</span><span class="z-entity z-name"> AesReader</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">limit_reader</span><span>,</span><span class="z-variable z-other"> aes_mode</span><span>,</span><span class="z-variable z-other"> data</span><span class="z-keyword">.</span><span>compressed_size</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">                .</span><span class="z-entity z-name">get_key_and_salt</span><span>(</span><span>)</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> NEW</span></span>
+<span class="giallo-l"><span class="z-keyword">                .</span><span class="z-entity z-name">expect</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">AES reader failed</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">            Ok</span><span>(</span><span class="z-entity z-name">Some</span><span>(</span><span>(</span><span class="z-variable z-other">aes_mode</span><span>,</span><span class="z-variable z-other"> key</span><span>,</span><span class="z-variable z-other"> salt</span><span>)</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>Luckily, Cargo makes it very low-friction to work with a forked crate!</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">zip</span><span class="z-string"> =</span><span class="z-string"> {</span><span class="z-string"> git</span><span class="z-string"> =</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">https://github.com/agourlay/zip.git</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">,</span><span class="z-string"> branch</span><span class="z-string"> =</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">zip-password-finder</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string"> }</span></span></code></pre>
+<p>Thanks to this insight, it is possible to pre-compute most of the AES information, removing a lot of work from the processing loop.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> AES info bindings initialized once</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> derived_key_len</span><span class="z-keyword"> =</span><span class="z-keyword"> ...</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> derived_key</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">u8</span><span>&gt;</span><span class="z-keyword"> =</span><span class="z-keyword"> ...</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> salt</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">u8</span><span>&gt;</span><span class="z-keyword"> =</span><span class="z-keyword"> ...</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> key</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">u8</span><span>&gt;</span><span class="z-keyword"> =</span><span class="z-keyword"> ...</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> processing loop</span></span>
+<span class="giallo-l"><span class="z-keyword">for</span><span class="z-variable z-other"> password</span><span class="z-keyword"> in</span><span class="z-variable z-other"> passwords_iter</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> password_bytes</span><span class="z-keyword"> =</span><span class="z-variable z-other"> password</span><span class="z-keyword">.</span><span class="z-entity z-name">as_bytes</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> potential_match</span><span class="z-keyword"> =</span><span class="z-constant"> true</span><span>;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> process AES KEY</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> use PBKDF2 with HMAC-Sha1 to derive the key</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    pbkdf2</span><span class="z-keyword">::</span><span class="z-entity z-name">pbkdf2</span><span class="z-keyword">::</span><span>&lt;</span><span class="z-entity z-name">Hmac</span><span>&lt;</span><span class="z-entity z-name">Sha1</span><span>&gt;</span><span>&gt;</span><span>(</span><span class="z-variable z-other">password_bytes</span><span>,</span><span class="z-keyword"> &amp;</span><span class="z-variable z-other">salt</span><span>,</span><span class="z-constant"> 1000</span><span>,</span><span class="z-keyword"> &amp;</span><span class="z-storage">mut</span><span class="z-variable z-other"> derived_key</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">expect</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">PBKDF2 should not fail</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> pwd_verify</span><span class="z-keyword"> =</span><span class="z-keyword"> &amp;</span><span class="z-variable z-other">derived_key</span><span>[</span><span class="z-variable z-other">derived_key_len</span><span class="z-keyword"> -</span><span class="z-constant"> 2</span><span class="z-keyword">..</span><span>]</span><span>;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> the last 2 bytes should equal the password verification value</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    potential_match</span><span class="z-keyword"> =</span><span class="z-variable z-other"> key</span><span class="z-keyword"> ==</span><span class="z-variable z-other"> pwd_verify</span><span>;</span></span>
+<span class="giallo-l"><span>    </span></span>
+<span class="giallo-l"><span class="z-keyword">    if</span><span class="z-variable z-other"> potential_match</span><span> {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">        //</span><span class="z-comment"> try to decode archive to eliminate collision</span></span>
+<span class="giallo-l"><span class="z-storage z-type">        let</span><span class="z-variable z-other"> res</span><span class="z-keyword"> =</span><span class="z-variable z-other"> archive</span><span class="z-keyword">.</span><span class="z-entity z-name">by_index_decrypt</span><span>(</span><span class="z-constant">0</span><span>,</span><span class="z-variable z-other"> password</span><span class="z-keyword">.</span><span class="z-entity z-name">as_bytes</span><span>(</span><span>)</span><span>)</span><span>;</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> decrypt first file in archive</span></span>
+<span class="giallo-l"><span class="z-keyword">        ...</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>Benchmarking the difference:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name"> hyperfine</span><span class="z-constant"> -</span><span class="z-constant">-runs</span><span class="z-constant"> 2</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-warmup</span><span class="z-constant"> 1</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-string"> before</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder-before -i secret.zip -c medium</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-string"> after</span><span class="z-punctuation z-definition z-string">  &quot;</span><span class="z-string">./zip-password-finder-after  -i secret.zip -c medium</span><span class="z-punctuation z-definition z-string">&quot;</span></span></code></pre><table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>before</code></td><td style="text-align: right">58.977 ± 0.512</td><td style="text-align: right">58.615</td><td style="text-align: right">59.339</td><td style="text-align: right">1.08 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>after</code></td><td style="text-align: right">54.476 ± 0.037</td><td style="text-align: right">54.450</td><td style="text-align: right">54.503</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>A solid 8% improvement is something I gladly take.</p>
+<h2 id="performance-over-time">Performance over time<a class="zola-anchor" href="#performance-over-time" aria-label="Anchor link for: performance-over-time" style="visibility: hidden;"></a>
+</h2>
+<p>Outside of the two previously mentioned improvements, the runtime improved slowly over time.</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.1</code></td><td style="text-align: right">62.317 ± 0.224</td><td style="text-align: right">62.159</td><td style="text-align: right">62.475</td><td style="text-align: right">1.21 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.2</code></td><td style="text-align: right">58.823 ± 0.013</td><td style="text-align: right">58.814</td><td style="text-align: right">58.833</td><td style="text-align: right">1.14 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.3</code></td><td style="text-align: right">59.423 ± 0.047</td><td style="text-align: right">59.390</td><td style="text-align: right">59.456</td><td style="text-align: right">1.15 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.4</code></td><td style="text-align: right">55.562 ± 0.034</td><td style="text-align: right">55.538</td><td style="text-align: right">55.586</td><td style="text-align: right">1.08 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.5</code></td><td style="text-align: right">56.877 ± 0.362</td><td style="text-align: right">56.621</td><td style="text-align: right">57.132</td><td style="text-align: right">1.10 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.5.1</code></td><td style="text-align: right">54.230 ± 0.424</td><td style="text-align: right">53.930</td><td style="text-align: right">54.530</td><td style="text-align: right">1.05 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.6</code></td><td style="text-align: right">51.619 ± 0.412</td><td style="text-align: right">51.327</td><td style="text-align: right">51.911</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>0.6.1</code></td><td style="text-align: right">52.421 ± 0.166</td><td style="text-align: right">52.303</td><td style="text-align: right">52.538</td><td style="text-align: right">1.02 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.6.2</code></td><td style="text-align: right">52.149 ± 0.155</td><td style="text-align: right">52.039</td><td style="text-align: right">52.259</td><td style="text-align: right">1.01 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.6.3</code></td><td style="text-align: right">52.073 ± 0.193</td><td style="text-align: right">51.937</td><td style="text-align: right">52.209</td><td style="text-align: right">1.01 ± 0.01</td></tr>
+</tbody></table>
+<p>However, the performance optimizations are hitting a wall; a single bottleneck is now largely dominating the CPU usage.</p>
+<p>Each worker is busy doing the following: (full <a href="/2023-04-03/final-flamegraph.svg">flamegraph</a> available).</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2023-04-03&#x2F;flamegraph-worker.png"
+         alt="Flamegraph worker"
+        
+        
+    >
+    
+</figure>
+<p>Computing the SHA1 for each candidate takes up to 90% of the total CPU time; improving this implementation would have a <strong>massive</strong> impact on the runtime!</p>
+<p>It is interesting to note that the function is called <code>sha1::compress::soft::compress</code> - now that's a weird name.</p>
+<p>Let's take a look under the <a rel="nofollow noreferrer external" href="https://github.com/RustCrypto/hashes/blob/master/sha1/src/compress/x86.rs#L102">hood</a>.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-entity z-name">cpufeatures</span><span class="z-keyword">::</span><span class="z-entity z-name">new!</span><span>(</span><span class="z-variable z-other">shani_cpuid</span><span>,</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">sha</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">sse2</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">ssse3</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">sse4.1</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-keyword">pub</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> compress</span><span>(</span><span class="z-variable z-other">state</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span class="z-storage">mut</span><span> [</span><span class="z-entity z-name">u32</span><span>;</span><span class="z-constant"> 5</span><span>]</span><span>,</span><span class="z-variable z-other"> blocks</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span>[</span><span>[</span><span class="z-entity z-name">u8</span><span>;</span><span class="z-constant"> 64</span><span>]</span><span>]</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">    if</span><span class="z-entity z-name"> shani_cpuid</span><span class="z-keyword">::</span><span class="z-entity z-name">get</span><span>(</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">        unsafe</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">            digest_blocks</span><span>(</span><span class="z-variable z-other">state</span><span>,</span><span class="z-variable z-other"> blocks</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    }</span><span class="z-keyword"> else</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-language">        super</span><span class="z-keyword">::</span><span class="z-entity z-name">soft</span><span class="z-keyword">::</span><span class="z-entity z-name">compress</span><span>(</span><span class="z-variable z-other">state</span><span>,</span><span class="z-variable z-other"> blocks</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>}</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>#</span><span>[</span><span>target_feature</span><span>(</span><span>enable </span><span class="z-keyword">=</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">sha,sse2,ssse3,sse4.1</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>]</span></span>
+<span class="giallo-l"><span class="z-keyword">unsafe</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> digest_blocks</span><span>(</span><span class="z-variable z-other">state</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span class="z-storage">mut</span><span> [</span><span class="z-entity z-name">u32</span><span>;</span><span class="z-constant"> 5</span><span>]</span><span>,</span><span class="z-variable z-other"> blocks</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span>[</span><span>[</span><span class="z-entity z-name">u8</span><span>;</span><span class="z-constant"> 64</span><span>]</span><span>]</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">   ...</span></span>
+<span class="giallo-l"><span>}</span><span>    </span></span></code></pre>
+<p>This code is picking an implementation at runtime based on the capabilities of the CPU.</p>
+<p>The branching depends on the <code>sha</code>, <code>sse2</code>, <code>ssse3</code> and <code>sse4.1</code> instruction sets.</p>
+<p>Here, <code>soft</code> stands for <code>software</code>, meaning not using hardware acceleration.</p>
+<p>But why is my CPU not eligible for the optimized SIMD implementation?</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">lscpu</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Architecture:</span><span class="z-string">            x86_64</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  CPU</span><span class="z-string"> op-mode</span><span>(</span><span class="z-entity z-name">s</span><span>)</span><span class="z-string">:</span><span class="z-string">        32-bit,</span><span class="z-string"> 64-bit</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  Address</span><span class="z-string"> sizes:</span><span class="z-constant">         39</span><span class="z-string"> bits</span><span class="z-string"> physical,</span><span class="z-constant"> 48</span><span class="z-string"> bits</span><span class="z-string"> virtual</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  Byte</span><span class="z-string"> Order:</span><span class="z-string">            Little</span><span class="z-string"> Endian</span></span>
+<span class="giallo-l"><span class="z-entity z-name">CPU(s</span><span>):                  8</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  On-line</span><span class="z-string"> CPU</span><span>(</span><span class="z-entity z-name">s</span><span>)</span><span class="z-string"> list:</span><span class="z-string">   0-7</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Vendor</span><span class="z-string"> ID:</span><span class="z-string">               GenuineIntel</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  Model</span><span class="z-string"> name:</span><span class="z-string">            Intel</span><span>(</span><span class="z-entity z-name">R</span><span>)</span><span class="z-string"> Core</span><span>(</span><span class="z-entity z-name">TM</span><span>)</span><span class="z-string"> i7-10610U</span><span class="z-string"> CPU</span><span class="z-string"> @</span><span class="z-string"> 1.80GHz</span></span>
+<span class="giallo-l"><span class="z-support">.</span><span class="z-support">.</span><span class="z-support">.</span></span>
+<span class="giallo-l"><span class="z-entity z-name"> Flags:</span><span class="z-string">               ...sse</span><span class="z-string"> sse2</span><span class="z-string"> ssse3</span><span class="z-string"> sse4_1</span><span class="z-string"> sse4_2...</span></span></code></pre>
+<p>Sadly, I have all the necessary <code>sse</code> instructions but missing the <code>sha</code> one.</p>
+<p>This means we need to make sure to use a CPU with <a rel="nofollow noreferrer external" href="https://en.wikipedia.org/wiki/Intel_SHA_extensions">SHA instructions</a> to get the best performance.</p>
+<h2 id="optimizing-build">Optimizing build<a class="zola-anchor" href="#optimizing-build" aria-label="Anchor link for: optimizing-build" style="visibility: hidden;"></a>
+</h2>
+<p>Given that I do not have access to adequate hardware, all I can do for the time being is tweak my build in order to squeeze out one last performance gain.</p>
+<p>The first idea is to enable Link-time Optimization (LTO), which is an optimization taking place at compile time.</p>
+<p>Be aware that it can make the compilation much slower!</p>
+<p>There are two possible values for it:</p>
+<pre class="giallo z-code"><code data-lang="plain"><span class="giallo-l"><span>[profile.release]</span></span>
+<span class="giallo-l"><span>lto = &quot;thin&quot; or &quot;fat&quot;</span></span></code></pre>
+<p>A second idea is to build a binary with the best instructions for the current CPU.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-variable z-other">RUSTFLAGS</span><span class="z-keyword">=</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">-C target-cpu=native</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-entity z-name"> cargo</span><span class="z-string"> build</span><span class="z-constant"> -</span><span class="z-constant">-release</span></span></code></pre>
+<p>Benchmarking those configurations yields the following results:</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>native</code></td><td style="text-align: right">52.456 ± 2.987</td><td style="text-align: right">50.344</td><td style="text-align: right">54.568</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>master</code></td><td style="text-align: right">57.439 ± 1.135</td><td style="text-align: right">56.637</td><td style="text-align: right">58.241</td><td style="text-align: right">1.09 ± 0.07</td></tr>
+<tr><td style="text-align: left"><code>native-lto</code></td><td style="text-align: right">59.161 ± 0.437</td><td style="text-align: right">58.852</td><td style="text-align: right">59.470</td><td style="text-align: right">1.13 ± 0.06</td></tr>
+<tr><td style="text-align: left"><code>lto-thin</code></td><td style="text-align: right">61.677 ± 0.153</td><td style="text-align: right">61.569</td><td style="text-align: right">61.786</td><td style="text-align: right">1.18 ± 0.07</td></tr>
+<tr><td style="text-align: left"><code>lto-fat</code></td><td style="text-align: right">67.777 ± 0.277</td><td style="text-align: right">67.582</td><td style="text-align: right">67.973</td><td style="text-align: right">1.29 ± 0.07</td></tr>
+</tbody></table>
+<p>Well, we better not enable LTO but there is a case to be made for a native build.</p>
+<p>This performance related section was a bit messy, but we learned a few important things:</p>
+<ul>
+<li>Do not blindly enable LTO without validating that it is beneficial.</li>
+<li>If you are super serious about performance, you would probably benefit from producing native binaries for your hardware.</li>
+<li>Some libraries have alternate implementations depending on the hardware capabilities.</li>
+</ul>
+<h2 id="state-of-the-art">State of the art<a class="zola-anchor" href="#state-of-the-art" aria-label="Anchor link for: state-of-the-art" style="visibility: hidden;"></a>
+</h2>
+<p>To appreciate the performance of <code>zip-password-finder</code>, I thought it would be a good idea to compare it to the state of the art of ZIP cracking.</p>
+<p>It seems <strong>serious</strong> people are using the <a rel="nofollow noreferrer external" href="https://hashcat.net/hashcat/">Hashcat</a> project, which is apparently the "World's fastest password cracker"!</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2023-04-03&#x2F;hashcat-logo.png"
+         alt="Hashcat logo"
+        
+        
+    >
+    
+</figure>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">sudo</span><span class="z-string"> apt-get</span><span class="z-string"> install</span><span class="z-string"> hashcat</span></span></code></pre>
+<p>This tool runs on GPUs; in my case, I had to install the <a rel="nofollow noreferrer external" href="https://github.com/intel/compute-runtime/">OpenCL Runtime for Intel Core</a>.</p>
+<p>It supports a very large list of algorithms, including the one we need here, <code>WinZip</code>.</p>
+<p>In order to use <code>Hashcat</code>, we first need to extract the underlying hash of our zip file into a format that is understood by <code>Hashcat</code>.</p>
+<p>To that end, we will use <code>zip2john</code> from the <a rel="nofollow noreferrer external" href="https://github.com/openwall/john">John the Ripper</a> project.</p>
+<p>Installing it <a rel="nofollow noreferrer external" href="https://superuser.com/questions/1457837/command-zip2john-is-not-working">manually</a> with:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">git</span><span class="z-string"> clone</span><span class="z-string"> https://github.com/openwall/john</span><span class="z-constant"> -</span><span class="z-constant">b</span><span class="z-string"> bleeding-jumbo</span><span class="z-string"> john</span></span>
+<span class="giallo-l"><span class="z-support">cd</span><span class="z-string"> john/src/</span></span>
+<span class="giallo-l"><span class="z-entity z-name">./configure</span></span>
+<span class="giallo-l"><span class="z-entity z-name">make</span><span class="z-constant"> -</span><span class="z-constant">s</span><span class="z-string"> clean</span><span> &amp;&amp;</span><span class="z-entity z-name"> make</span><span class="z-constant"> -</span><span class="z-constant">sj4</span></span></code></pre>
+<p>and then running it</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-support">cd</span><span class="z-string"> /Workspace/john/run</span></span>
+<span class="giallo-l"><span class="z-entity z-name">./zip2john</span><span class="z-string"> ~/zip-files/secret.zip</span></span></code></pre>
+<p>yields the text</p>
+<pre class="giallo z-code"><code data-lang="plain"><span class="giallo-l"><span>secret.zip/secret.txt:$zip2$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a99031db50f79a*d9e156b830df03899575*$/zip2$:secret.txt:secret.zip:/home/agourlay/zip-files/secret.zip</span></span></code></pre>
+<p>The output needs to be cleaned up and saved into a file, <code>hash.txt</code> here.</p>
+<pre class="giallo z-code"><code data-lang="plain"><span class="giallo-l"><span>$zip2$*0*1*0*abf015b7750c67f9*f8fe*d*c97f48465ca6a99031db50f79a*d9e156b830df03899575*$/zip2$</span></span></code></pre>
+<p>After a rather tedious setup, it is finally time to crack our hash!</p>
+<p>We need to instruct <code>hashcat</code> to:</p>
+<ul>
+<li>perform a brute force attack</li>
+<li>target the <code>hash.txt</code></li>
+<li>use an algorithm for ZIP archive hashes</li>
+<li>generate passwords for a charset with lower case, upper case and digits (up to 4 chars)</li>
+</ul>
+<p>Luckily for us, the help prompt is truly excellent!</p>
+<p>Here are the interesting excerpts:</p>
+<p>For the attack mode:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">-</span><span> [</span><span class="z-string"> Attack</span><span class="z-string"> Modes</span><span class="z-string"> ]</span><span class="z-string"> -</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">  #</span><span class="z-comment"> | Mode</span></span>
+<span class="giallo-l"><span class="z-string"> =</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">+</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  0</span><span class="z-keyword"> |</span><span class="z-entity z-name"> Straight</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  1</span><span class="z-keyword"> |</span><span class="z-entity z-name"> Combination</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  3</span><span class="z-keyword"> |</span><span class="z-entity z-name"> Brute-force</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  6</span><span class="z-keyword"> |</span><span class="z-entity z-name"> Hybrid</span><span class="z-string"> Wordlist</span><span class="z-string"> +</span><span class="z-string"> Mask</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  7</span><span class="z-keyword"> |</span><span class="z-entity z-name"> Hybrid</span><span class="z-string"> Mask</span><span class="z-string"> +</span><span class="z-string"> Wordlist</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  9</span><span class="z-keyword"> |</span><span class="z-entity z-name"> Association</span></span></code></pre>
+<p>For the hash type:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">-</span><span> [</span><span class="z-string"> Hash</span><span class="z-string"> modes</span><span class="z-string"> ]</span><span class="z-string"> -</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">      #</span><span class="z-comment"> | Name                                                | Category</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  13600</span><span class="z-keyword"> |</span><span class="z-entity z-name"> WinZip</span><span class="z-keyword">                                              |</span><span class="z-entity z-name"> Archive</span></span></code></pre>
+<p>For the charset:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">  ?</span><span class="z-keyword"> |</span><span class="z-entity z-name"> Charset</span></span>
+<span class="giallo-l"><span class="z-string"> =</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">+</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  l</span><span class="z-keyword"> |</span><span class="z-entity z-name"> abcdefghijklmnopqrstuvwxyz</span><span> [a-z</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  u</span><span class="z-keyword"> |</span><span class="z-entity z-name"> ABCDEFGHIJKLMNOPQRSTUVWXYZ</span><span> [A-Z</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  d</span><span class="z-keyword"> |</span><span class="z-entity z-name"> 0123456789</span><span>                 [0-9</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  h</span><span class="z-keyword"> |</span><span class="z-entity z-name"> 0123456789abcdef</span><span>           [0-9a-f</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  H</span><span class="z-keyword"> |</span><span class="z-entity z-name"> 0123456789ABCDEF</span><span>           [0-9A-F</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  s</span><span class="z-keyword"> |</span><span class="z-keyword">  !</span><span class="z-entity z-name">&quot;</span><span class="z-entity z-name">#$%&amp;&#39;()*+,-./:;&lt;=&gt;?@[\]^_</span><span class="z-string">`</span><span class="z-string">{|}~</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  a</span><span class="z-keyword"> |</span><span class="z-entity z-name"> ?l?u?d?s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  b</span><span class="z-keyword"> |</span><span class="z-entity z-name"> 0x00</span><span class="z-string"> -</span><span class="z-constant"> 0xff</span></span></code></pre>
+<p>According to the <a rel="nofollow noreferrer external" href="https://hashcat.net/wiki/doku.php?id=mask_attack">documentation</a>, it seems we need to set up a four-character mask that will be explored incrementally.</p>
+<p>After a bit of trial and error, it gives the following magic incantation:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">hashcat</span><span class="z-constant"> -</span><span class="z-constant">a</span><span class="z-constant"> 3</span><span class="z-string"> hash.txt</span><span class="z-constant"> -</span><span class="z-constant">m</span><span class="z-constant"> 13600</span><span class="z-constant"> -</span><span class="z-constant">1</span><span class="z-string"> ?l?u?d</span><span class="z-string"> ?1?1?1?1</span><span class="z-constant"> -</span><span class="z-constant">-increment</span></span></code></pre>
+<p>Let's go!</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-keyword">time</span><span> hashcat -a 3 hash.txt -m 13600 -1 </span><span class="z-keyword">?</span><span>l</span><span class="z-keyword">?</span><span>u</span><span class="z-keyword">?</span><span>d </span><span class="z-keyword">?</span><span>1</span><span class="z-keyword">?</span><span>1</span><span class="z-keyword">?</span><span>1</span><span class="z-keyword">?</span><span>1 --increment</span></span>
+<span class="giallo-l"><span class="z-entity z-name">hashcat</span><span> (v6.2.5</span><span>) starting</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">OpenCL</span><span class="z-string"> API</span><span> (OpenCL</span><span class="z-constant"> 3.0</span><span> ) - Platform</span><span class="z-punctuation z-definition z-comment"> #</span><span class="z-comment">1 [Intel(R) Corporation]</span></span>
+<span class="giallo-l"><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span><span class="z-string">=</span></span>
+<span class="giallo-l"><span class="z-keyword">*</span><span> Device</span><span class="z-punctuation z-definition z-comment"> #</span><span class="z-comment">1: Intel(R) UHD Graphics [0x9b41], 12640/25384 MB (2047 MB allocatable), 24MCU</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Minimum</span><span class="z-string"> password</span><span class="z-string"> length</span><span class="z-string"> supported</span><span class="z-string"> by</span><span class="z-string"> kernel:</span><span class="z-constant"> 0</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Maximum</span><span class="z-string"> password</span><span class="z-string"> length</span><span class="z-string"> supported</span><span class="z-string"> by</span><span class="z-string"> kernel:</span><span class="z-constant"> 256</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Hashes:</span><span class="z-constant"> 1</span><span class="z-string"> digests</span><span>;</span><span class="z-entity z-name"> 1</span><span class="z-string"> unique</span><span class="z-string"> digests,</span><span class="z-constant"> 1</span><span class="z-string"> unique</span><span class="z-string"> salts</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Bitmaps:</span><span class="z-constant"> 16</span><span class="z-string"> bits,</span><span class="z-constant"> 65536</span><span class="z-string"> entries,</span><span class="z-constant"> 0x0000ffff</span><span class="z-string"> mask,</span><span class="z-constant"> 262144</span><span class="z-string"> bytes,</span><span class="z-string"> 5/13</span><span class="z-string"> rotates</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Optimizers</span><span class="z-string"> applied:</span></span>
+<span class="giallo-l"><span class="z-keyword">*</span><span> Zero-Byte</span></span>
+<span class="giallo-l"><span class="z-keyword">*</span><span> Single-Hash</span></span>
+<span class="giallo-l"><span class="z-keyword">*</span><span> Single-Salt</span></span>
+<span class="giallo-l"><span class="z-keyword">*</span><span> Brute-Force</span></span>
+<span class="giallo-l"><span class="z-keyword">*</span><span> Slow-Hash-SIMD-LOOP</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Watchdog:</span><span class="z-string"> Hardware</span><span class="z-string"> monitoring</span><span class="z-string"> interface</span><span class="z-string"> not</span><span class="z-string"> found</span><span class="z-string"> on</span><span class="z-string"> your</span><span class="z-string"> system.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Watchdog:</span><span class="z-string"> Temperature</span><span class="z-string"> abort</span><span class="z-string"> trigger</span><span class="z-string"> disabled.</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Host</span><span class="z-string"> memory</span><span class="z-string"> required</span><span class="z-string"> for</span><span class="z-string"> this</span><span class="z-string"> attack:</span><span class="z-constant"> 1475</span><span class="z-string"> MB</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">The</span><span class="z-string"> wordlist</span><span class="z-string"> or</span><span class="z-string"> mask</span><span class="z-string"> that</span><span class="z-string"> you</span><span class="z-string"> are</span><span class="z-string"> using</span><span class="z-string"> is</span><span class="z-string"> too</span><span class="z-string"> small.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">This</span><span class="z-string"> means</span><span class="z-string"> that</span><span class="z-string"> hashcat</span><span class="z-string"> cannot</span><span class="z-string"> use</span><span class="z-string"> the</span><span class="z-string"> full</span><span class="z-string"> parallel</span><span class="z-string"> power</span><span class="z-string"> of</span><span class="z-string"> your</span><span class="z-string"> device</span><span>(</span><span class="z-entity z-name">s</span><span>)</span><span class="z-string">.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Unless</span><span class="z-string"> you</span><span class="z-string"> supply</span><span class="z-string"> more</span><span class="z-string"> work,</span><span class="z-string"> your</span><span class="z-string"> cracking</span><span class="z-string"> speed</span><span class="z-string"> will</span><span class="z-string"> drop.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">For</span><span class="z-string"> tips</span><span class="z-string"> on</span><span class="z-string"> supplying</span><span class="z-string"> more</span><span class="z-string"> work,</span><span class="z-string"> see:</span><span class="z-string"> https://hashcat.net/faq/morework</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Approaching</span><span class="z-string"> final</span><span class="z-string"> keyspace</span><span class="z-string"> -</span><span class="z-string"> workload</span><span class="z-string"> adjusted.</span><span>           </span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Session..........:</span><span class="z-string"> hashcat</span><span>                                </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Status...........:</span><span class="z-string"> Exhausted</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Hash.Mode........:</span><span class="z-constant"> 13600</span><span> (WinZip</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Hash.Target......:</span><span class="z-variable z-other"> $</span><span class="z-variable z-other">zip2</span><span>$</span><span class="z-variable z-language">*</span><span class="z-string">0</span><span class="z-variable z-language">*</span><span class="z-string">1</span><span class="z-variable z-language">*</span><span class="z-string">0</span><span class="z-variable z-language">*</span><span class="z-string">abf015b7750c67f9</span><span class="z-variable z-language">*</span><span class="z-string">f8fe</span><span class="z-variable z-language">*</span><span class="z-string">d</span><span class="z-variable z-language">*</span><span class="z-string">c97f48465ca6a9.../zip2</span><span>$</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Time.Started.....:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:53:49</span><span class="z-constant"> 2023</span><span> (0</span><span class="z-string"> secs</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Time.Estimated...:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:53:49</span><span class="z-constant"> 2023</span><span> (0</span><span class="z-string"> secs</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Kernel.Feature...:</span><span class="z-string"> Pure</span><span class="z-string"> Kernel</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Mask.......:</span><span class="z-string"> ?1</span><span> [1</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Charset....:</span><span class="z-constant"> -</span><span class="z-constant">1</span><span class="z-string"> ?l?u?d,</span><span class="z-constant"> -</span><span class="z-constant">2</span><span class="z-string"> Undefined,</span><span class="z-constant"> -</span><span class="z-constant">3</span><span class="z-string"> Undefined,</span><span class="z-constant"> -</span><span class="z-constant">4</span><span class="z-string"> Undefined</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Queue......:</span><span class="z-string"> 1/4</span><span> (25.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Speed.#1.........:</span><span class="z-constant">      117</span><span class="z-string"> H/s</span><span> (6.27ms</span><span>) @ Accel:32 Loops:999 Thr:8 Vec:1</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Recovered........:</span><span class="z-string"> 0/1</span><span> (0.00%</span><span>) Digests</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Progress.........:</span><span class="z-string"> 62/62</span><span> (100.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Rejected.........:</span><span class="z-string"> 0/62</span><span> (0.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Restore.Point....:</span><span class="z-string"> 1/1</span><span> (100.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Restore.Sub.#1...:</span><span class="z-string"> Salt:0</span><span class="z-string"> Amplifier:61-62</span><span class="z-string"> Iteration:0-999</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Candidate.Engine.:</span><span class="z-string"> Device</span><span class="z-string"> Generator</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Candidates.#1....:</span><span class="z-string"> X</span><span> -</span><span class="z-keyword">&gt;</span><span class="z-string"> X</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">The</span><span class="z-string"> wordlist</span><span class="z-string"> or</span><span class="z-string"> mask</span><span class="z-string"> that</span><span class="z-string"> you</span><span class="z-string"> are</span><span class="z-string"> using</span><span class="z-string"> is</span><span class="z-string"> too</span><span class="z-string"> small.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">This</span><span class="z-string"> means</span><span class="z-string"> that</span><span class="z-string"> hashcat</span><span class="z-string"> cannot</span><span class="z-string"> use</span><span class="z-string"> the</span><span class="z-string"> full</span><span class="z-string"> parallel</span><span class="z-string"> power</span><span class="z-string"> of</span><span class="z-string"> your</span><span class="z-string"> device</span><span>(</span><span class="z-entity z-name">s</span><span>)</span><span class="z-string">.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Unless</span><span class="z-string"> you</span><span class="z-string"> supply</span><span class="z-string"> more</span><span class="z-string"> work,</span><span class="z-string"> your</span><span class="z-string"> cracking</span><span class="z-string"> speed</span><span class="z-string"> will</span><span class="z-string"> drop.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">For</span><span class="z-string"> tips</span><span class="z-string"> on</span><span class="z-string"> supplying</span><span class="z-string"> more</span><span class="z-string"> work,</span><span class="z-string"> see:</span><span class="z-string"> https://hashcat.net/faq/morework</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Approaching</span><span class="z-string"> final</span><span class="z-string"> keyspace</span><span class="z-string"> -</span><span class="z-string"> workload</span><span class="z-string"> adjusted.</span><span>           </span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Session..........:</span><span class="z-string"> hashcat</span><span>                                </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Status...........:</span><span class="z-string"> Exhausted</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Hash.Mode........:</span><span class="z-constant"> 13600</span><span> (WinZip</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Hash.Target......:</span><span class="z-variable z-other"> $</span><span class="z-variable z-other">zip2</span><span>$</span><span class="z-variable z-language">*</span><span class="z-string">0</span><span class="z-variable z-language">*</span><span class="z-string">1</span><span class="z-variable z-language">*</span><span class="z-string">0</span><span class="z-variable z-language">*</span><span class="z-string">abf015b7750c67f9</span><span class="z-variable z-language">*</span><span class="z-string">f8fe</span><span class="z-variable z-language">*</span><span class="z-string">d</span><span class="z-variable z-language">*</span><span class="z-string">c97f48465ca6a9.../zip2</span><span>$</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Time.Started.....:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:53:52</span><span class="z-constant"> 2023</span><span> (0</span><span class="z-string"> secs</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Time.Estimated...:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:53:52</span><span class="z-constant"> 2023</span><span> (0</span><span class="z-string"> secs</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Kernel.Feature...:</span><span class="z-string"> Pure</span><span class="z-string"> Kernel</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Mask.......:</span><span class="z-string"> ?1?1</span><span> [2</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Charset....:</span><span class="z-constant"> -</span><span class="z-constant">1</span><span class="z-string"> ?l?u?d,</span><span class="z-constant"> -</span><span class="z-constant">2</span><span class="z-string"> Undefined,</span><span class="z-constant"> -</span><span class="z-constant">3</span><span class="z-string"> Undefined,</span><span class="z-constant"> -</span><span class="z-constant">4</span><span class="z-string"> Undefined</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Queue......:</span><span class="z-string"> 2/4</span><span> (50.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Speed.#1.........:</span><span class="z-constant">     7321</span><span class="z-string"> H/s</span><span> (6.27ms</span><span>) @ Accel:16 Loops:999 Thr:16 Vec:1</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Recovered........:</span><span class="z-string"> 0/1</span><span> (0.00%</span><span>) Digests</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Progress.........:</span><span class="z-string"> 3844/3844</span><span> (100.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Rejected.........:</span><span class="z-string"> 0/3844</span><span> (0.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Restore.Point....:</span><span class="z-string"> 62/62</span><span> (100.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Restore.Sub.#1...:</span><span class="z-string"> Salt:0</span><span class="z-string"> Amplifier:61-62</span><span class="z-string"> Iteration:0-999</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Candidate.Engine.:</span><span class="z-string"> Device</span><span class="z-string"> Generator</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Candidates.#1....:</span><span class="z-string"> Xa</span><span> -</span><span class="z-keyword">&gt;</span><span class="z-string"> XQ</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">The</span><span class="z-string"> wordlist</span><span class="z-string"> or</span><span class="z-string"> mask</span><span class="z-string"> that</span><span class="z-string"> you</span><span class="z-string"> are</span><span class="z-string"> using</span><span class="z-string"> is</span><span class="z-string"> too</span><span class="z-string"> small.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">This</span><span class="z-string"> means</span><span class="z-string"> that</span><span class="z-string"> hashcat</span><span class="z-string"> cannot</span><span class="z-string"> use</span><span class="z-string"> the</span><span class="z-string"> full</span><span class="z-string"> parallel</span><span class="z-string"> power</span><span class="z-string"> of</span><span class="z-string"> your</span><span class="z-string"> device</span><span>(</span><span class="z-entity z-name">s</span><span>)</span><span class="z-string">.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Unless</span><span class="z-string"> you</span><span class="z-string"> supply</span><span class="z-string"> more</span><span class="z-string"> work,</span><span class="z-string"> your</span><span class="z-string"> cracking</span><span class="z-string"> speed</span><span class="z-string"> will</span><span class="z-string"> drop.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">For</span><span class="z-string"> tips</span><span class="z-string"> on</span><span class="z-string"> supplying</span><span class="z-string"> more</span><span class="z-string"> work,</span><span class="z-string"> see:</span><span class="z-string"> https://hashcat.net/faq/morework</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Approaching</span><span class="z-string"> final</span><span class="z-string"> keyspace</span><span class="z-string"> -</span><span class="z-string"> workload</span><span class="z-string"> adjusted.</span><span>           </span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Session..........:</span><span class="z-string"> hashcat</span><span>                                </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Status...........:</span><span class="z-string"> Exhausted</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Hash.Mode........:</span><span class="z-constant"> 13600</span><span> (WinZip</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Hash.Target......:</span><span class="z-variable z-other"> $</span><span class="z-variable z-other">zip2</span><span>$</span><span class="z-variable z-language">*</span><span class="z-string">0</span><span class="z-variable z-language">*</span><span class="z-string">1</span><span class="z-variable z-language">*</span><span class="z-string">0</span><span class="z-variable z-language">*</span><span class="z-string">abf015b7750c67f9</span><span class="z-variable z-language">*</span><span class="z-string">f8fe</span><span class="z-variable z-language">*</span><span class="z-string">d</span><span class="z-variable z-language">*</span><span class="z-string">c97f48465ca6a9.../zip2</span><span>$</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Time.Started.....:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:53:55</span><span class="z-constant"> 2023</span><span> (6</span><span class="z-string"> secs</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Time.Estimated...:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:54:01</span><span class="z-constant"> 2023</span><span> (0</span><span class="z-string"> secs</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Kernel.Feature...:</span><span class="z-string"> Pure</span><span class="z-string"> Kernel</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Mask.......:</span><span class="z-string"> ?1?1?1</span><span> [3</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Charset....:</span><span class="z-constant"> -</span><span class="z-constant">1</span><span class="z-string"> ?l?u?d,</span><span class="z-constant"> -</span><span class="z-constant">2</span><span class="z-string"> Undefined,</span><span class="z-constant"> -</span><span class="z-constant">3</span><span class="z-string"> Undefined,</span><span class="z-constant"> -</span><span class="z-constant">4</span><span class="z-string"> Undefined</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Queue......:</span><span class="z-string"> 3/4</span><span> (75.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Speed.#1.........:</span><span class="z-constant">    40570</span><span class="z-string"> H/s</span><span> (8.17ms</span><span>) @ Accel:16 Loops:999 Thr:16 Vec:1</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Recovered........:</span><span class="z-string"> 0/1</span><span> (0.00%</span><span>) Digests</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Progress.........:</span><span class="z-string"> 238328/238328</span><span> (100.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Rejected.........:</span><span class="z-string"> 0/238328</span><span> (0.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Restore.Point....:</span><span class="z-string"> 3844/3844</span><span> (100.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Restore.Sub.#1...:</span><span class="z-string"> Salt:0</span><span class="z-string"> Amplifier:61-62</span><span class="z-string"> Iteration:0-999</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Candidate.Engine.:</span><span class="z-string"> Device</span><span class="z-string"> Generator</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Candidates.#1....:</span><span class="z-string"> XFz</span><span> -</span><span class="z-keyword">&gt;</span><span class="z-string"> XQz</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-variable z-other">$</span><span class="z-variable z-other">zip2</span><span>$</span><span class="z-keyword">*</span><span>0</span><span class="z-keyword">*</span><span>1</span><span class="z-keyword">*</span><span>0</span><span class="z-keyword">*</span><span>abf015b7750c67f9</span><span class="z-keyword">*</span><span>f8fe</span><span class="z-keyword">*</span><span>d</span><span class="z-keyword">*</span><span>c97f48465ca6a99031db50f79a</span><span class="z-keyword">*</span><span>d9e156b830df03899575</span><span class="z-keyword">*</span><span>$/zip2$:ab12</span></span>
+<span class="giallo-l"><span>                                                          </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Session..........:</span><span class="z-string"> hashcat</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Status...........:</span><span class="z-string"> Cracked</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Hash.Mode........:</span><span class="z-constant"> 13600</span><span> (WinZip</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Hash.Target......:</span><span class="z-variable z-other"> $</span><span class="z-variable z-other">zip2</span><span>$</span><span class="z-variable z-language">*</span><span class="z-string">0</span><span class="z-variable z-language">*</span><span class="z-string">1</span><span class="z-variable z-language">*</span><span class="z-string">0</span><span class="z-variable z-language">*</span><span class="z-string">abf015b7750c67f9</span><span class="z-variable z-language">*</span><span class="z-string">f8fe</span><span class="z-variable z-language">*</span><span class="z-string">d</span><span class="z-variable z-language">*</span><span class="z-string">c97f48465ca6a9.../zip2</span><span>$</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Time.Started.....:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:54:04</span><span class="z-constant"> 2023</span><span> (1</span><span class="z-string"> sec</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Time.Estimated...:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:54:05</span><span class="z-constant"> 2023</span><span> (0</span><span class="z-string"> secs</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Kernel.Feature...:</span><span class="z-string"> Pure</span><span class="z-string"> Kernel</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Mask.......:</span><span class="z-string"> ?1?1?1?1</span><span> [4</span><span>]</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Charset....:</span><span class="z-constant"> -</span><span class="z-constant">1</span><span class="z-string"> ?l?u?d,</span><span class="z-constant"> -</span><span class="z-constant">2</span><span class="z-string"> Undefined,</span><span class="z-constant"> -</span><span class="z-constant">3</span><span class="z-string"> Undefined,</span><span class="z-constant"> -</span><span class="z-constant">4</span><span class="z-string"> Undefined</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">Guess.Queue......:</span><span class="z-string"> 4/4</span><span> (100.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Speed.#1.........:</span><span class="z-constant">    49139</span><span class="z-string"> H/s</span><span> (101.71ms</span><span>) @ Accel:16 Loops:999 Thr:16 Vec:1</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Recovered........:</span><span class="z-string"> 1/1</span><span> (100.00%</span><span>) Digests</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Progress.........:</span><span class="z-string"> 36864/14776336</span><span> (0.25%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Rejected.........:</span><span class="z-string"> 0/36864</span><span> (0.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Restore.Point....:</span><span class="z-string"> 0/238328</span><span> (0.00%</span><span>)</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Restore.Sub.#1...:</span><span class="z-string"> Salt:0</span><span class="z-string"> Amplifier:5-6</span><span class="z-string"> Iteration:0-999</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Candidate.Engine.:</span><span class="z-string"> Device</span><span class="z-string"> Generator</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Candidates.#1....:</span><span class="z-string"> aari</span><span> -</span><span class="z-keyword">&gt;</span><span class="z-string"> arIS</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Started:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:53:42</span><span class="z-constant"> 2023</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Stopped:</span><span class="z-string"> Sat</span><span class="z-string"> Apr</span><span class="z-constant">  1</span><span class="z-string"> 15:54:05</span><span class="z-constant"> 2023</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">real</span><span class="z-string"> 0m23,617s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">user</span><span class="z-string"> 0m6,331s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">sys</span><span class="z-string">  0m10,747s</span></span></code></pre>
+<p>That's a lot of logs; each block represents the outcome of the exploration of length-value space.</p>
+<p>In any case, it found the password in 23 seconds, two times faster than <code>zip-password-finder</code>!</p>
+<p>At peak speed, it processed <code>49139 H/s</code> which is roughly 10 times faster than <code>zip-password-finder</code> on my configuration.</p>
+<p>It does so while still complaining about not being able to fully use the system.</p>
+<p>For this reason, I expect the difference between the two tools to be much larger with a larger password.</p>
+<p>Especially if you have a real graphics card, the throughput will likely be expressed in <code>MH</code>.</p>
+<p>Hashcat is a fantastic tool with great performance; it was however not easy to set up, so it may be reserved for advanced users.</p>
+<h2 id="future-work">Future work<a class="zola-anchor" href="#future-work" aria-label="Anchor link for: future-work" style="visibility: hidden;"></a>
+</h2>
+<p>The re-architecting has not solved the scaling issues; it would be interesting to dig deeper and benchmark the code on a machine with a much larger number of cores.</p>
+<p>Talking about testing different hardware, it would be great to have results using a CPU with the <code>sha</code> instruction to benefit from proper hardware acceleration.</p>
+<p>Being able to speed up the default implementation of the <code>sha1</code> crate would also yield significant gains.</p>
+<p>A current issue is the accumulation of technical debt; by contributing the AES info extraction helpers upstream to <code>zip-rs</code>, we would avoid having to maintain a fork forever.</p>
+<p>Finally, Hashcat has made a great impression, and I would like to explore it for further inspiration.</p>
+<h2 id="conclusion">Conclusion<a class="zola-anchor" href="#conclusion" aria-label="Anchor link for: conclusion" style="visibility: hidden;"></a>
+</h2>
+<p>This article has explained a few performance optimizations that helped make <code>zip-password-finder</code> a bit faster over time.</p>
+<p>However, it has also highlighted that the recent efforts have entered a zone of diminishing returns due to a clear bottleneck.</p>
+<p>It seems cracking hashes requires dedicated hardware: be it CPUs with particular instructions or even better GPUs.</p>
+<p>This has been made somewhat clear by comparing our Rust program to the great Hashcat.</p>
+<p>In general, expert tooling tends to perform very well but suffers from an accessibility issue.</p>
+<p>The project <code>zip-password-finder</code> is very easy to use but has a long way to go to be competitive.</p>
+
+      </article>
+
+      
+      
+
+      
+      
+    </div>
+
+    <footer>
+  <div class="left">
+    <div class="copyright">
+      © 2026 Arnaud Gourlay
+      
+      <span>|</span>
+      Built with <a href="https://www.getzola.org" rel="noreferrer" target="_blank">zola</a> and <a href="https://github.com/isunjn/serene" rel="noreferrer" target="_blank">serene</a>
+      
+    </div>
+    <div class="sponsor">
+      Enjoying my work? Consider <a href="https://github.com/sponsors/agourlay" rel="noreferrer" target="_blank">sponsoring me</a> on GitHub.
+    </div>
+  </div>
+
+  <div class="right">
+    
+    <a id="rss-btn" href="https://agourlay.github.io/atom.xml" aria-label="RSS feed">RSS</a>
+    
+
+    
+    
+    
+    <button id="theme-toggle" aria-label="theme switch">
+      <span class="moon-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M10 7C10 10.866 13.134 14 17 14C18.9584 14 20.729 13.1957 21.9995 11.8995C22 11.933 22 11.9665 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C12.0335 2 12.067 2 12.1005 2.00049C10.8043 3.27098 10 5.04157 10 7ZM4 12C4 16.4183 7.58172 20 12 20C15.0583 20 17.7158 18.2839 19.062 15.7621C18.3945 15.9187 17.7035 16 17 16C12.0294 16 8 11.9706 8 7C8 6.29648 8.08133 5.60547 8.2379 4.938C5.71611 6.28423 4 8.9417 4 12Z" fill="currentColor"></path></svg>
+</span>
+      <span class="sun-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12 18C8.68629 18 6 15.3137 6 12C6 8.68629 8.68629 6 12 6C15.3137 6 18 8.68629 18 12C18 15.3137 15.3137 18 12 18ZM12 16C14.2091 16 16 14.2091 16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16ZM11 1H13V4H11V1ZM11 20H13V23H11V20ZM3.51472 4.92893L4.92893 3.51472L7.05025 5.63604L5.63604 7.05025L3.51472 4.92893ZM16.9497 18.364L18.364 16.9497L20.4853 19.0711L19.0711 20.4853L16.9497 18.364ZM19.0711 3.51472L20.4853 4.92893L18.364 7.05025L16.9497 5.63604L19.0711 3.51472ZM5.63604 16.9497L7.05025 18.364L4.92893 20.4853L3.51472 19.0711L5.63604 16.9497ZM23 11V13H20V11H23ZM4 11V13H1V11H4Z" fill="currentColor"></path></svg>
+</span>
+    </button>
+    
+  </div>
+</footer>
+
+  </main>
+</div>
+
+  
+<script src="/js/lightense.min.js"></script>
+
+
+  <script src="https://agourlay.github.io/js/main.js"></script>
+</body>
+
+</html>

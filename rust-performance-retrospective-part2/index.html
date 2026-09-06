@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  
+    
+  <meta name="description" content="Second part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust.">
+<link rel="canonical" href="https://agourlay.github.io/rust-performance-retrospective-part2/">
+<meta property="og:site_name" content="Arnaud Gourlay&#x27;s blog">
+<meta property="og:type" content="article">
+<meta property="og:title" content="A performance retrospective using Rust (part 2)">
+<meta property="og:description" content="Second part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust.">
+<meta property="og:url" content="https://agourlay.github.io/rust-performance-retrospective-part2/">
+<meta property="og:locale" content="en">
+
+
+<meta property="article:published_time" content="2022-07-23">
+
+<meta property="article:tag" content="Rust">
+<meta property="article:tag" content="performance">
+<meta property="article:tag" content="hprof-slurp">
+<meta property="article:tag" content="memcopy">
+<meta property="article:tag" content="series">
+
+
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="A performance retrospective using Rust (part 2)">
+<meta name="twitter:description" content="Second part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust.">
+
+
+
+  <title>A performance retrospective using Rust (part 2)</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="https://agourlay.github.io/img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://agourlay.github.io/img/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://agourlay.github.io/img/apple-touch-icon.png">
+  
+  <style>
+
+  /* light mode colors */
+  body {
+    --primary-color: #5871a2;
+    --primary-pale-color: #5871a233;
+    --primary-decoration-color: #5871a210;
+    --bg-color: #ffffff;
+    --text-color: #2f3030;
+    --text-pale-color: #767676;
+    --text-decoration-color: #a9a9a9;
+    --highlight-mark-color: #5f75b020;
+
+    --callout-note-color: #5871a2;
+    --callout-tip-color: #268556;
+    --callout-important-color: #885fc9;
+    --callout-warning-color: #ab6632;
+    --callout-caution-color: #c64e4e;
+  }
+
+  /* dark mode colors */
+  body.dark {
+    --primary-color: #6f8fd1;
+    --primary-pale-color: #6f8fd166;
+    --primary-decoration-color: #6f8fd112;
+    --bg-color: #1c1c1c;
+    --text-color: #c1c1c1;
+    --text-pale-color: #848484;
+    --text-decoration-color: #5f5f5f;
+    --highlight-mark-color: #8296cb3b;
+
+    --callout-note-color: #6f8fd1;
+    --callout-tip-color: #47976f;
+    --callout-important-color: #9776cd;
+    --callout-warning-color: #ad7a52;
+    --callout-caution-color: #d06161;
+  }
+
+  /* typography */
+  body {
+    --main-font: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --code-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    --homepage-max-width: 768px;
+    --main-max-width: 768px;
+    --avatar-size: 60px;
+    --font-size: 16px;
+    --line-height: 1.75;
+    --img-border-radius: 0px;
+    --detail-border-radius: 0px;
+    --dark-mode-img-brightness: 0.75;
+    --dark-mode-chart-brightness: 0.75;
+    --inline-code-border-radius: 2px;
+    --inline-code-bg-color: var(--primary-decoration-color);
+    --block-code-border-radius: 0px;
+    --block-code-border-color: var(--primary-color);
+    --detail-border-color: var(--primary-color);
+  }
+
+</style>
+
+  <link rel="stylesheet" href="https://agourlay.github.io/main.css">
+  
+
+<link id="hl" rel="stylesheet" type="text/css" href="/giallo-light.css" />
+
+
+
+  <style>
+  /* Avatar: crop to fill the circle instead of distorting a non-square image */
+  #info img { object-fit: cover; object-position: center 22%; }
+  /* Footer: stack the copyright and sponsor lines instead of running them together
+     (Serene's `footer .left` is a flex row, meant for a single line) */
+  footer .left { flex-direction: column; align-items: flex-start; gap: 3px; }
+  /* Float the footer controls (RSS + theme toggle) to a fixed top-right cluster so
+     they're visible on landing without scrolling. Same elements, so main.js still works. */
+  footer .right {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    z-index: 50;
+    margin: 0;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 10px;
+    background: rgba(128, 128, 128, 0.12);
+  }
+  footer .right:hover { background: rgba(128, 128, 128, 0.20); }
+  footer .right #theme-toggle { transform: none; }
+</style>
+
+</head>
+
+<body class="post">
+  
+  <script>
+    const theme = sessionStorage.getItem('theme');
+    const match = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if ((theme && theme == 'dark') || (!theme && match)) {
+      document.body.classList.add('dark');
+      const hl = document.querySelector('link#hl');
+      if (hl) hl.href = 'https://agourlay.github.io/giallo-dark.css';
+    }
+  </script>
+  
+  
+<div id="wrapper">
+  <div id="blank"></div>
+  <aside>
+    
+    
+    <nav>
+      <ul>
+        
+        <li>
+          <a class="h2" href="#avoiding-memcopy">Avoiding memcopy</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#reasonable-boxing">Reasonable boxing</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#clippy">Clippy</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#conclusion">Conclusion</a>
+          
+        </li>
+        
+      </ul>
+    </nav>
+    
+    
+    <button id="back-to-top" aria-label="back to top">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-arrow-up"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+
+    </button>
+    
+  </aside>
+  <main>
+    
+<header>
+  <nav>
+    <a id="back-link" href="https:&#x2F;&#x2F;agourlay.github.io&#x2F;posts">← Back</a>
+  </nav>
+</header>
+
+
+    <div>
+      
+      
+      
+      
+      <div id="copy-cfg" style="display: none;" data-copy-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M6.9998 6V3C6.9998 2.44772 7.44752 2 7.9998 2H19.9998C20.5521 2 20.9998 2.44772 20.9998 3V17C20.9998 17.5523 20.5521 18 19.9998 18H16.9998V20.9991C16.9998 21.5519 16.5499 22 15.993 22H4.00666C3.45059 22 3 21.5554 3 20.9991L3.0026 7.00087C3.0027 6.44811 3.45264 6 4.00942 6H6.9998ZM5.00242 8L5.00019 20H14.9998V8H5.00242ZM8.9998 6H16.9998V16H18.9998V4H8.9998V6Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+" data-check-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M10.0007 15.1709L19.1931 5.97852L20.6073 7.39273L10.0007 17.9993L3.63672 11.6354L5.05093 10.2212L10.0007 15.1709Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+"></div>
+      
+      <article class="prose">
+        <h1>A performance retrospective using Rust (part 2)</h1>
+        <div id="post-info">
+          <div id="date">
+            <span id="publish">23 July 2022</span>
+            </div>
+
+          
+          <div id="tags">
+            <a class="instant" href="https://agourlay.github.io/tags/rust"><span>#</span>Rust</a><a class="instant" href="https://agourlay.github.io/tags/performance"><span>#</span>performance</a><a class="instant" href="https://agourlay.github.io/tags/hprof-slurp"><span>#</span>hprof-slurp</a><a class="instant" href="https://agourlay.github.io/tags/memcopy"><span>#</span>memcopy</a><a class="instant" href="https://agourlay.github.io/tags/series"><span>#</span>series</a>
+          </div>
+          
+        </div>
+
+        
+        
+
+        
+
+        <p>This article is the second part of a performance retrospective regarding the <a rel="nofollow noreferrer external" href="https://github.com/agourlay/hprof-slurp">hprof-slurp</a> project. It is highly recommended to start with the <a href="/rust-performance-retrospective-part1/">first part</a> to get a good grasp of the context.</p>
+<p>We left off after a presentation of the project and a detailed description of the benchmarking methodology used to measure performance gains.</p>
+<p>In this article we will focus on a specific issue that has been plaguing the 0.3.x series.</p>
+<h2 id="avoiding-memcopy">Avoiding memcopy<a class="zola-anchor" href="#avoiding-memcopy" aria-label="Anchor link for: avoiding-memcopy" style="visibility: hidden;"></a>
+</h2>
+<p>As the program got faster, I witnessed the <code>memcpy</code> instructions slowly creeping up in the flamegraphs to the point where they accounted for most of the computation.</p>
+<p>Below - in purple - you can see the <code>_memcpy_avx_unaligned_erms</code> representing most of the work in the parser thread (full <a href="/2022-07-23/flamegraph-0.3.3.svg">flamegraph</a>).</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-07-23&#x2F;flamegraph-memcopy.png"
+         alt="Flamegraph with memcopy"
+        
+        
+    >
+    
+</figure>
+<p>At first, I thought it was an inherent cost of parsing large files, but as it grew to become the largest bottleneck in <code>hprof-slurp</code>, I decided to investigate the issue to - at the very least - understand it.</p>
+<p>I found the answer to this mystery in the fantastic <a rel="nofollow noreferrer external" href="https://nnethercote.github.io/perf-book/type-sizes.html">Rust performance book</a>.</p>
+<blockquote class="quote">
+  
+  <div class="icon" style="display: none;"><svg fill="currentColor" xmlns="http://www.w3.org/2000/svg"  width="10" height="10" viewBox="796 698 200 200">
+<g>
+	<path d="M885.208,749.739v-40.948C836.019,708.791,796,748.81,796,798v89.209h89.208V798h-48.26
+		C836.948,771.39,858.598,749.739,885.208,749.739z"/>
+	<path d="M996,749.739v-40.948c-49.19,0-89.209,40.019-89.209,89.209v89.209H996V798h-48.26
+		C947.74,771.39,969.39,749.739,996,749.739z"/>
+</g>
+</svg>
+</div>
+  <div class="content"><p>Rust types that are larger than 128 bytes are copied with memcpy rather than inline code.
+Shrinking these types to 128 bytes or less can make the code faster by avoiding memcpy calls and reducing memory traffic.</p>
+</div>
+  
+  <div class="from">
+    <p>— Rust performance book</p>
+
+  </div>
+  
+</blockquote>
+<p>Therefore, within my code I needed to find the large types that are used very often on the parser's path.</p>
+<p>Let's generate the type sizes with:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-variable z-other">RUSTFLAGS</span><span class="z-keyword">=</span><span class="z-string">-</span><span class="z-string">Z</span><span class="z-string">p</span><span class="z-string">r</span><span class="z-string">i</span><span class="z-string">n</span><span class="z-string">t</span><span class="z-string">-</span><span class="z-string">t</span><span class="z-string">y</span><span class="z-string">p</span><span class="z-string">e</span><span class="z-string">-</span><span class="z-string">s</span><span class="z-string">i</span><span class="z-string">z</span><span class="z-string">e</span><span class="z-string">s</span><span class="z-entity z-name"> cargo</span><span class="z-string"> +nightly</span><span class="z-string"> build</span><span class="z-constant"> -</span><span class="z-constant">-release</span></span></code></pre>
+<p>In my opinion, it can be a bit cumbersome to navigate the output of <code>-Zprint-type-sizes</code>.</p>
+<p>One alternative recommended by the Rust performance book is to use DHAT’s “copy profiling” mode, which works great as well.</p>
+<p>I will stick to <code>-Zprint-type-sizes</code> for the remainder of the article as it helps understand the memory layout on the way.</p>
+<p>Looking at the types I own in the output section, we can find the following</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string"> type:</span><span class="z-string"> `</span><span class="z-entity z-name">parser::record::Record</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 136</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     discriminant:</span><span class="z-constant"> 2</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     variant</span><span class="z-string"> `</span><span class="z-entity z-name">GcSegment</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 134</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 6</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.0</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 128</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     variant</span><span class="z-string"> `</span><span class="z-entity z-name">AllocationSites</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 62</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.flags</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 2</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.cutoff_ratio</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.total_live_bytes</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.total_live_instances</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.number_of_sites</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.total_bytes_allocated</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.total_instances_allocated</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.allocation_sites</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-support">.</span><span class="z-support">.</span><span class="z-support">.</span><span class="z-string"> more</span><span class="z-string"> variants</span><span class="z-string"> with</span><span class="z-string"> decreasing</span><span class="z-string"> size</span></span></code></pre>
+<p>The <code>parser::record::Record</code> is an enum which represents all possible top-level records found in an <code>hprof</code> file.</p>
+<p>The largest variant is <code>GcSegment</code>, with 134 bytes, which is larger than the 128 bytes mentioned above.</p>
+<p>The corresponding Rust code looks like the following:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> enum</span><span class="z-entity z-name"> Record</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  GcSegment</span><span>(</span><span class="z-entity z-name">GcRecord</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  AllocationSites</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    flags</span><span class="z-keyword">:</span><span class="z-entity z-name"> u16</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    cutoff_ratio</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    total_live_bytes</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    total_live_instances</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    total_bytes_allocated</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    total_instances_allocated</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    number_of_sites</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    allocation_sites</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">AllocationSite</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span>  }</span><span>,</span></span>
+<span class="giallo-l"><span class="z-keyword">  ...</span><span class="z-variable z-other"> more</span><span class="z-variable z-other"> variants</span></span>
+<span class="giallo-l"><span>}</span><span>  </span></span></code></pre>
+<p>The <code>parser::gc_record::GcRecord</code> is itself an enum as well. It models all possible elements found on the JVM's heap.</p>
+<p>Let's find in the output the size of a <code>GcRecord</code>.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string"> type:</span><span class="z-string"> `</span><span class="z-entity z-name">parser::gc_record::GcRecord</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 128</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     discriminant:</span><span class="z-constant"> 1</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     variant</span><span class="z-string"> `</span><span class="z-entity z-name">ClassDump</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 127</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 1</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.constant_pool_size</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 2</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 2</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.stack_trace_serial_number</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.instance_size</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.class_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.super_class_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.class_loader_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.signers_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.protection_domain_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.const_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.static_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.instance_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     variant</span><span class="z-string"> `</span><span class="z-entity z-name">ObjectArrayDump</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 55</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 3</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.stack_trace_serial_number</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.number_of_elements</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.array_class_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.elements</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-support">.</span><span class="z-support">.</span><span class="z-support">.</span><span class="z-string"> more</span><span class="z-string"> variant</span><span class="z-string"> with</span><span class="z-string"> decreasing</span><span class="z-string"> size</span></span></code></pre>
+<p>For the following definition:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> enum</span><span class="z-entity z-name"> GcRecord</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    ClassDump</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        class_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        stack_trace_serial_number</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        super_class_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        class_loader_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        signers_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        protection_domain_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        instance_size</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        constant_pool_size</span><span class="z-keyword">:</span><span class="z-entity z-name"> u16</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        const_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span>(</span><span class="z-entity z-name">ConstFieldInfo</span><span>,</span><span class="z-entity z-name"> FieldValue</span><span>)</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        static_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span>(</span><span class="z-entity z-name">FieldInfo</span><span>,</span><span class="z-entity z-name"> FieldValue</span><span>)</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        instance_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">FieldInfo</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span>    }</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    ObjectArrayDump</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        stack_trace_serial_number</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        number_of_elements</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        array_class_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        elements</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">u64</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span>    }</span><span>,</span></span>
+<span class="giallo-l"><span class="z-keyword">    ...</span><span class="z-variable z-other"> more</span><span class="z-variable z-other"> variants</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>At this point, we can see that there is logically a direct mapping between the fields of the structs and their actual sizes.</p>
+<p>Moreover, there is a critical observation to make regarding enums.</p>
+<p><strong>Enums are sized according to the largest variant</strong>.</p>
+<p>An enum is sized with its largest variant plus some memory for an internal discriminant field.</p>
+<p>This means the 134 bytes for a <code>GcSegment</code> are being allocated for every <code>parser::record::Record</code> variant.</p>
+<p>This quickly adds up when a program is crunching millions of records.</p>
+<p>The common wisdom for decreasing the stack memory footprint is to use heap allocation, often referred to as boxing.</p>
+<p>Let's try boxing the content of <code>GcSegment</code>.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-entity z-name">GcSegment</span><span>(</span><span class="z-entity z-name">Box</span><span>&lt;</span><span class="z-entity z-name">GcRecord</span><span>&gt;</span><span>)</span><span>,</span></span></code></pre>
+<p>This change gives the following type sizes (after applying the necessary modifications to handle the new Box type at the call sites).</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string"> type:</span><span class="z-string"> `</span><span class="z-entity z-name">parser::record::Record</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 64</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     discriminant:</span><span class="z-constant"> 2</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     variant</span><span class="z-string"> `</span><span class="z-entity z-name">AllocationSites</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 62</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.flags</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 2</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.cutoff_ratio</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.total_live_bytes</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.total_live_instances</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.number_of_sites</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.total_bytes_allocated</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.total_instances_allocated</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.allocation_sites</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-support">.</span><span class="z-support">.</span><span class="z-support">.</span><span class="z-string"> more</span><span class="z-string"> variant</span><span class="z-string"> with</span><span class="z-string"> decreasing</span><span class="z-string"> size</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     variant</span><span class="z-string"> `</span><span class="z-entity z-name">GcSegment</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 14</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 6</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.0</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span></code></pre>
+<p>Looking good!</p>
+<p>The type <code>parser::record::Record</code> went from 136 bytes to 64 bytes because all variants are now sized according to the next largest variant, <code>AllocationSites</code> at 62 bytes.</p>
+<p>The <code>memcpy</code> should not be a problem anymore.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">hyperfine</span><span class="z-constant"> -</span><span class="z-constant">-runs</span><span class="z-constant"> 3</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-markdown</span><span class="z-string"> hprof.md</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.3.3</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.3.3 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-string"> box</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span></span></code></pre><table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.3.3</code></td><td style="text-align: right">77.442 ± 2.537</td><td style="text-align: right">74.513</td><td style="text-align: right">78.968</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>box</code></td><td style="text-align: right">270.785 ± 0.907</td><td style="text-align: right">270.031</td><td style="text-align: right">271.792</td><td style="text-align: right">3.50 ± 0.12</td></tr>
+</tbody></table>
+<p>Ouch! It is over three times slower!</p>
+<p>Let's have a look at the flamegraph to understand where the CPU spends its time.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-07-23&#x2F;flamegraph-box.png"
+         alt="Flamegraph with boxing"
+        
+        
+    >
+    
+</figure>
+<p>In purple, you can see the cost of <code>Box::new</code> in the parser thread (full <a href="/2022-07-23/flamegraph-box.svg">flamegraph</a> available).</p>
+<p>Welp, we did fix the <code>memcpy</code> issue, but the application is terribly slow.</p>
+<p>Boxing is, unfortunately, not some kind of magic sauce that will fix all our problems.</p>
+<p>Performing heap allocation has a higher cost than stack allocation, and we are now performing it for each instance found in the JVM heap dump.</p>
+<h2 id="reasonable-boxing">Reasonable boxing<a class="zola-anchor" href="#reasonable-boxing" aria-label="Anchor link for: reasonable-boxing" style="visibility: hidden;"></a>
+</h2>
+<p>In the previous section, we have seen that <code>GcSegment</code> cannot be boxed efficiently because it appears too frequently during the execution of the application.</p>
+<p>We also have seen that the largest variant of <code>GcSegment</code> is <code>ClassDump</code>, clocking in at 127 bytes.</p>
+<p>Based on the enumeration sizing discovery, we know that the 127 bytes for a <code>ClassDump</code> are being allocated for every <code>GcSegment</code> record.</p>
+<p>However, the <code>ClassDump</code> is a relatively rare element compared to the actual instance dumps. An application has a few hundred classes but millions of instances.</p>
+<p>It is unfortunate to systematically pay the full price for something that is infrequent.</p>
+<p>The intuition is that we should be moving the boxing cost to the <code>ClassDump</code> only.</p>
+<p>Let's try to box the individual fields in <code>ClassDump</code> instead.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> enum</span><span class="z-entity z-name"> GcRecord</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    ClassDump</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        class_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        stack_trace_serial_number</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        super_class_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        class_loader_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        signers_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        protection_domain_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        instance_size</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        constant_pool_size</span><span class="z-keyword">:</span><span class="z-entity z-name"> u16</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        const_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span>(</span><span class="z-entity z-name">ConstFieldInfo</span><span>,</span><span class="z-entity z-name"> FieldValue</span><span>)</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        static_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span>(</span><span class="z-entity z-name">FieldInfo</span><span>,</span><span class="z-entity z-name"> FieldValue</span><span>)</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        instance_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">FieldInfo</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span class="z-keyword">    ...</span></span>
+<span class="giallo-l"><span>}</span><span>   </span></span></code></pre>
+<p>The <code>Vec</code> type contains three words: a length, a capacity, and a pointer. That is 3 * 8 = 24 bytes on a 64-bit architecture.</p>
+<p>Boxing each vector would save 16 bytes per field.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> enum</span><span class="z-entity z-name"> GcRecord</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    ClassDump</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        class_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        stack_trace_serial_number</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        super_class_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        class_loader_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        signers_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        protection_domain_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        instance_size</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        constant_pool_size</span><span class="z-keyword">:</span><span class="z-entity z-name"> u16</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        const_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Box</span><span>&lt;</span><span class="z-entity z-name">Vec</span><span>&lt;</span><span>(</span><span class="z-entity z-name">ConstFieldInfo</span><span>,</span><span class="z-entity z-name"> FieldValue</span><span>)</span><span>&gt;</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        static_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Box</span><span>&lt;</span><span class="z-entity z-name">Vec</span><span>&lt;</span><span>(</span><span class="z-entity z-name">FieldInfo</span><span>,</span><span class="z-entity z-name"> FieldValue</span><span>)</span><span>&gt;</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        instance_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Box</span><span>&lt;</span><span class="z-entity z-name">Vec</span><span>&lt;</span><span class="z-entity z-name">FieldInfo</span><span>&gt;</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span class="z-keyword">    ...</span></span>
+<span class="giallo-l"><span>}</span><span>    </span></span></code></pre>
+<p>Fetching the new type's size yields the following:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string"> type:</span><span class="z-string"> `</span><span class="z-entity z-name">parser::gc_record::GcRecord</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 80</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     discriminant:</span><span class="z-constant"> 1</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     variant</span><span class="z-string"> `</span><span class="z-entity z-name">ClassDump</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 79</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 1</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.constant_pool_size</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 2</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 2</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.stack_trace_serial_number</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.instance_size</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.class_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.super_class_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.class_loader_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.signers_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.protection_domain_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.const_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.static_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.instance_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span></code></pre>
+<p>This is exactly what we were expecting; one word per boxed field.</p>
+<p>But we have learned the hard way not to celebrate prematurely before checking how it pans out in a benchmark.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">hyperfine</span><span class="z-constant"> -</span><span class="z-constant">-runs</span><span class="z-constant"> 3</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-markdown</span><span class="z-string"> hprof.md</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.3.3</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.3.3 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-string"> boxes</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span></span></code></pre><table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.3.3</code></td><td style="text-align: right">76.691 ± 3.326</td><td style="text-align: right">73.080</td><td style="text-align: right">79.629</td><td style="text-align: right">1.12 ± 0.05</td></tr>
+<tr><td style="text-align: left"><code>boxes</code></td><td style="text-align: right">68.625 ± 1.262</td><td style="text-align: right">67.202</td><td style="text-align: right">69.605</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>It runs 11% faster. It's not bad for such a small change!</p>
+<p>But let's try to go faster by reducing the size of the <code>ClassDump</code> variant even more.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> struct</span><span class="z-entity z-name"> ClassDumpFields</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    const_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span>(</span><span class="z-entity z-name">ConstFieldInfo</span><span>,</span><span class="z-entity z-name"> FieldValue</span><span>)</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    static_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span>(</span><span class="z-entity z-name">FieldInfo</span><span>,</span><span class="z-entity z-name"> FieldValue</span><span>)</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    instance_fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">FieldInfo</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span>}</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> enum</span><span class="z-entity z-name"> GcRecord</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    ClassDump</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        class_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        stack_trace_serial_number</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        super_class_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        class_loader_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        signers_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        protection_domain_object_id</span><span class="z-keyword">:</span><span class="z-entity z-name"> u64</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        instance_size</span><span class="z-keyword">:</span><span class="z-entity z-name"> u32</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        constant_pool_size</span><span class="z-keyword">:</span><span class="z-entity z-name"> u16</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        fields</span><span class="z-keyword">:</span><span class="z-entity z-name"> Box</span><span>&lt;</span><span class="z-entity z-name">ClassDumpFields</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span class="z-keyword">    ...</span></span>
+<span class="giallo-l"><span>}</span><span>    </span></span></code></pre>
+<p>Which has the following type size:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string"> type:</span><span class="z-string"> `</span><span class="z-entity z-name">parser::gc_record::ClassDumpFields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 72</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     field</span><span class="z-string"> `</span><span class="z-entity z-name">.const_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     field</span><span class="z-string"> `</span><span class="z-entity z-name">.static_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     field</span><span class="z-string"> `</span><span class="z-entity z-name">.instance_fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 24</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-support">.</span><span class="z-support">.</span><span class="z-support">.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string"> type:</span><span class="z-string"> `</span><span class="z-entity z-name">parser::gc_record::GcRecord</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 64</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     discriminant:</span><span class="z-constant"> 1</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">     variant</span><span class="z-string"> `</span><span class="z-entity z-name">ClassDump</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 63</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 1</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.constant_pool_size</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 2</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 2</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.stack_trace_serial_number</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.instance_size</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         padding:</span><span class="z-constant"> 4</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.class_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes,</span><span class="z-string"> alignment:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.super_class_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.class_loader_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.signers_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.protection_domain_object_id</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-entity z-name">print-type-size</span><span class="z-string">         field</span><span class="z-string"> `</span><span class="z-entity z-name">.fields</span><span class="z-string">`</span><span class="z-support">:</span><span class="z-constant"> 8</span><span class="z-string"> bytes</span></span></code></pre>
+<p>We shaved off 16 more bytes.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">hyperfine</span><span class="z-constant"> -</span><span class="z-constant">-runs</span><span class="z-constant"> 3</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-markdown</span><span class="z-string"> hprof.md</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.3.3</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.3.3 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-string"> boxes</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-boxes -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-string"> box-struct</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span></span></code></pre><table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.3.3</code></td><td style="text-align: right">75.638 ± 4.154</td><td style="text-align: right">70.900</td><td style="text-align: right">78.660</td><td style="text-align: right">1.15 ± 0.06</td></tr>
+<tr><td style="text-align: left"><code>boxes</code></td><td style="text-align: right">68.621 ± 0.399</td><td style="text-align: right">68.194</td><td style="text-align: right">68.986</td><td style="text-align: right">1.04 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>box-struct</code></td><td style="text-align: right">65.978 ± 0.185</td><td style="text-align: right">65.764</td><td style="text-align: right">66.086</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>This last change gave us an extra 4%, which is quite nice.</p>
+<p>To go further, one would need to remove unnecessary fields from the <code>ClassDump</code> variant.</p>
+<h2 id="clippy">Clippy<a class="zola-anchor" href="#clippy" aria-label="Anchor link for: clippy" style="visibility: hidden;"></a>
+</h2>
+<p>Before wrapping up this article, it is mandatory to note that Clippy has a lint for this class of problems, which I, <strong>of course</strong> discovered only much later.</p>
+<p>It is called <a rel="nofollow noreferrer external" href="https://rust-lang.github.io/rust-clippy/master/index.html#large_enum_variant">large_enum_variant</a> and kicks in when the difference between the largest variant and the smallest variant is larger than 200 bytes.</p>
+<p>The documentation warns us about something very important that we discovered as well.</p>
+
+<blockquote class="callout warning has-title">
+  
+  
+  <p class="title">
+    <span class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12.865 3.00017L22.3912 19.5002C22.6674 19.9785 22.5035 20.5901 22.0252 20.8662C21.8732 20.954 21.7008 21.0002 21.5252 21.0002H2.47266C1.92037 21.0002 1.47266 20.5525 1.47266 20.0002C1.47266 19.8246 1.51886 19.6522 1.60663 19.5002L11.1329 3.00017C11.4091 2.52187 12.0206 2.358 12.4989 2.63414C12.651 2.72191 12.7772 2.84815 12.865 3.00017ZM4.20471 19.0002H19.7932L11.9989 5.50017L4.20471 19.0002ZM10.9989 16.0002H12.9989V18.0002H10.9989V16.0002ZM10.9989 9.00017H12.9989V14.0002H10.9989V9.00017Z" fill="currentColor"></path></svg>
+
+    </span>
+    <strong>Warning</strong>
+  </p>
+  <div class="content">
+    <p>This lint obviously cannot take the distribution of variants in your running program into account. It is possible that the smaller variants make up less than 1% of all instances, in which case the overhead is negligible and the boxing is counter-productive. Always measure the change this lint suggests.</p>
+
+  </div>
+  
+</blockquote>
+
+<p>Let's give this lint a try by creating a <code>clippy.toml</code> file in the project and configuring this lint to be more aggressive with:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">enum-variant-size-threshold</span><span class="z-string"> =</span><span class="z-constant"> 100</span><span class="z-punctuation z-definition z-comment"> #</span><span class="z-comment"> instead of the default value 200</span></span></code></pre>
+<p>Running <code>cargo clippy</code> yields two entries:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">warning:</span><span class="z-string"> large</span><span class="z-string"> size</span><span class="z-string"> difference</span><span class="z-string"> between</span><span class="z-string"> variants</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  --</span><span>&gt;</span><span class="z-string"> src/parser/record.rs:97:5</span></span>
+<span class="giallo-l"><span class="z-keyword">   |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">97</span><span class="z-keyword"> |</span><span class="z-entity z-name">     GcSegment(GcRecord</span><span>),</span></span>
+<span class="giallo-l"><span class="z-keyword">   |</span><span class="z-entity z-name">     ^^^^^^^^^^^^^^^^^^^</span><span class="z-string"> this</span><span class="z-string"> variant</span><span class="z-string"> is</span><span class="z-constant"> 128</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-keyword">   |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">note:</span><span class="z-string"> and</span><span class="z-string"> the</span><span class="z-string"> second-largest</span><span class="z-string"> variant</span><span class="z-string"> is</span><span class="z-constant"> 58</span><span class="z-string"> bytes:</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  --</span><span>&gt;</span><span class="z-string"> src/parser/record.rs:55:5</span></span>
+<span class="giallo-l"><span class="z-keyword">   |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">55</span><span class="z-keyword"> |</span><span class="z-entity z-name"> /</span><span class="z-string">     AllocationSites</span><span class="z-string"> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">56</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         flags:</span><span class="z-string"> u16,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">57</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         cutoff_ratio:</span><span class="z-string"> u32,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">58</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         total_live_bytes:</span><span class="z-string"> u32,</span></span>
+<span class="giallo-l"><span class="z-support">.</span><span class="z-support">.</span><span class="z-support">.</span><span class="z-keyword">  |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">63</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         allocation_sites:</span><span class="z-string"> Vec</span><span class="z-keyword">&lt;</span><span class="z-string">AllocationSit</span><span>e</span><span class="z-keyword">&gt;</span><span class="z-string">,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">64</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span>     },</span></span>
+<span class="giallo-l"><span class="z-keyword">   |</span><span class="z-keyword"> |</span><span class="z-entity z-name">_____^</span></span>
+<span class="giallo-l"><span class="z-string">   =</span><span class="z-string"> help:</span><span class="z-string"> for</span><span class="z-string"> further</span><span class="z-string"> information</span><span class="z-string"> visit</span><span class="z-string"> https://rust-lang.github.io/rust-clippy/master/index.html#large_enum_variant</span></span>
+<span class="giallo-l"><span class="z-entity z-name">help:</span><span class="z-string"> consider</span><span class="z-string"> boxing</span><span class="z-string"> the</span><span class="z-string"> large</span><span class="z-string"> fields</span><span class="z-string"> to</span><span class="z-string"> reduce</span><span class="z-string"> the</span><span class="z-string"> total</span><span class="z-string"> size</span><span class="z-string"> of</span><span class="z-string"> the</span><span class="z-string"> enum</span></span>
+<span class="giallo-l"><span class="z-keyword">   |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">97</span><span class="z-keyword"> |</span><span class="z-entity z-name">     GcSegment(Box</span><span>&lt;GcRecord&gt;</span><span>),</span></span>
+<span class="giallo-l"><span class="z-keyword">   |</span><span>  </span></span></code></pre>
+<p>We tried this already and it did not work. Clippy tries its best, but remember, it cannot know about the distribution of variants through a static analysis.</p>
+<p>And the second entry:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">warning:</span><span class="z-string"> large</span><span class="z-string"> size</span><span class="z-string"> difference</span><span class="z-string"> between</span><span class="z-string"> variants</span></span>
+<span class="giallo-l"><span class="z-entity z-name">   --</span><span>&gt;</span><span class="z-string"> src/parser/gc_record.rs:127:5</span></span>
+<span class="giallo-l"><span class="z-keyword">    |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">127</span><span class="z-keyword"> |</span><span class="z-entity z-name"> /</span><span class="z-string">     ClassDump</span><span class="z-string"> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">128</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         class_object_id:</span><span class="z-string"> u64,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">129</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         stack_trace_serial_number:</span><span class="z-string"> u32,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">130</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         super_class_object_id:</span><span class="z-string"> u64,</span></span>
+<span class="giallo-l"><span class="z-support">.</span><span class="z-support">.</span><span class="z-support">.</span><span class="z-keyword">   |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">138</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         instance_fields:</span><span class="z-string"> Vec</span><span class="z-keyword">&lt;</span><span class="z-string">FieldInf</span><span>o</span><span class="z-keyword">&gt;</span><span class="z-string">,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">139</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span>     },</span></span>
+<span class="giallo-l"><span class="z-keyword">    |</span><span class="z-keyword"> |</span><span class="z-entity z-name">_____^</span><span class="z-string"> this</span><span class="z-string"> variant</span><span class="z-string"> is</span><span class="z-constant"> 122</span><span class="z-string"> bytes</span></span>
+<span class="giallo-l"><span class="z-keyword">    |</span></span>
+<span class="giallo-l"><span class="z-string">    =</span><span class="z-string"> note:</span><span class="z-string"> `</span><span class="z-punctuation z-definition z-comment">#</span><span class="z-comment">[warn(clippy::large_enum_variant)]</span><span class="z-string">`</span><span class="z-entity z-name"> on</span><span class="z-string"> by</span><span class="z-string"> default</span></span>
+<span class="giallo-l"><span class="z-entity z-name">note:</span><span class="z-string"> and</span><span class="z-string"> the</span><span class="z-string"> second-largest</span><span class="z-string"> variant</span><span class="z-string"> is</span><span class="z-constant"> 49</span><span class="z-string"> bytes:</span></span>
+<span class="giallo-l"><span class="z-entity z-name">   --</span><span>&gt;</span><span class="z-string"> src/parser/gc_record.rs:120:5</span></span>
+<span class="giallo-l"><span class="z-keyword">    |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">120</span><span class="z-keyword"> |</span><span class="z-entity z-name"> /</span><span class="z-string">     PrimitiveArrayDump</span><span class="z-string"> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">121</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         object_id:</span><span class="z-string"> u64,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">122</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         stack_trace_serial_number:</span><span class="z-string"> u32,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">123</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         number_of_elements:</span><span class="z-string"> u32,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">124</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         element_type:</span><span class="z-string"> FieldType,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">125</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span class="z-entity z-name">         array_value:</span><span class="z-string"> ArrayValue,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">126</span><span class="z-keyword"> |</span><span class="z-keyword"> |</span><span>     },</span></span>
+<span class="giallo-l"><span class="z-keyword">    |</span><span class="z-keyword"> |</span><span class="z-entity z-name">_____^</span></span>
+<span class="giallo-l"><span class="z-string">    =</span><span class="z-string"> help:</span><span class="z-string"> for</span><span class="z-string"> further</span><span class="z-string"> information</span><span class="z-string"> visit</span><span class="z-string"> https://rust-lang.github.io/rust-clippy/master/index.html#large_enum_variant</span></span>
+<span class="giallo-l"><span class="z-entity z-name">help:</span><span class="z-string"> consider</span><span class="z-string"> boxing</span><span class="z-string"> the</span><span class="z-string"> large</span><span class="z-string"> fields</span><span class="z-string"> to</span><span class="z-string"> reduce</span><span class="z-string"> the</span><span class="z-string"> total</span><span class="z-string"> size</span><span class="z-string"> of</span><span class="z-string"> the</span><span class="z-string"> enum</span></span>
+<span class="giallo-l"><span class="z-keyword">    |</span></span>
+<span class="giallo-l"><span class="z-entity z-name">138</span><span class="z-keyword"> |</span><span class="z-entity z-name">         instance_fields:</span><span class="z-string"> Box</span><span class="z-keyword">&lt;</span><span class="z-string">Vec</span><span class="z-keyword">&lt;</span><span class="z-string">FieldInf</span><span>o</span><span class="z-keyword">&gt;&gt;</span><span class="z-string">,</span></span>
+<span class="giallo-l"><span class="z-keyword">    |</span><span class="z-entity z-name">                          ~~~~~~~~~~~~~~~~~~~</span></span></code></pre>
+<p>Which is the lead we ended up exploring as well.</p>
+<p>Sometimes the best way to learn is to rediscover what everyone already knows for yourself.</p>
+<p>Clippy is truly a fantastic tool and one of my personal favorites in the whole Rust ecosystem. Depending on your context, it may make sense to configure custom values for certain lints to get the most out of them.</p>
+<h2 id="conclusion">Conclusion<a class="zola-anchor" href="#conclusion" aria-label="Anchor link for: conclusion" style="visibility: hidden;"></a>
+</h2>
+<p>This article has presented a bottleneck due to excessive <code>memcopy</code> which was slowing down <code>hprof-slurp</code> prior to the 0.4.0 release.</p>
+<p>The final fix took only a few lines of code but had a <a rel="nofollow noreferrer external" href="https://github.com/agourlay/hprof-slurp/commit/73392f1210c09a86e5dbd59629b6ed0302a05dfc">strong</a> positive effect on performance.</p>
+<p>In order to get there, we had to understand a few details regarding the way Rust sizes types internally, more specifically, enumerations.</p>
+<p>As a rule of thumb, it is recommended to avoid single outsized variants when creating enumerations as it impacts the memory usage of all variants.</p>
+<p>One also must be careful when trying to reduce the stack memory pressure via boxing. Allocating on the heap is not magic, and its cost must be understood in the context of the application.</p>
+<p>The next article in this <a href="/tags/series/">series</a> will go through another interesting optimization encountered while making <code>hprof-slurp</code> faster.</p>
+
+<blockquote class="callout note has-title">
+  
+  
+  <p class="title">
+    <span class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z" fill="currentColor"></path></svg>
+
+    </span>
+    <strong>Update</strong>
+  </p>
+  <div class="content">
+    <p>The article submission on <a rel="nofollow noreferrer external" href="https://www.reddit.com/r/rust/comments/w7pelk/a_performance_retrospective_using_rust_part_2/">reddit/r/rust</a> contains excellent comments.</p>
+
+  </div>
+  
+</blockquote>
+
+
+      </article>
+
+      
+      
+
+      
+      
+    </div>
+
+    <footer>
+  <div class="left">
+    <div class="copyright">
+      © 2026 Arnaud Gourlay
+      
+      <span>|</span>
+      Built with <a href="https://www.getzola.org" rel="noreferrer" target="_blank">zola</a> and <a href="https://github.com/isunjn/serene" rel="noreferrer" target="_blank">serene</a>
+      
+    </div>
+    <div class="sponsor">
+      Enjoying my work? Consider <a href="https://github.com/sponsors/agourlay" rel="noreferrer" target="_blank">sponsoring me</a> on GitHub.
+    </div>
+  </div>
+
+  <div class="right">
+    
+    <a id="rss-btn" href="https://agourlay.github.io/atom.xml" aria-label="RSS feed">RSS</a>
+    
+
+    
+    
+    
+    <button id="theme-toggle" aria-label="theme switch">
+      <span class="moon-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M10 7C10 10.866 13.134 14 17 14C18.9584 14 20.729 13.1957 21.9995 11.8995C22 11.933 22 11.9665 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C12.0335 2 12.067 2 12.1005 2.00049C10.8043 3.27098 10 5.04157 10 7ZM4 12C4 16.4183 7.58172 20 12 20C15.0583 20 17.7158 18.2839 19.062 15.7621C18.3945 15.9187 17.7035 16 17 16C12.0294 16 8 11.9706 8 7C8 6.29648 8.08133 5.60547 8.2379 4.938C5.71611 6.28423 4 8.9417 4 12Z" fill="currentColor"></path></svg>
+</span>
+      <span class="sun-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12 18C8.68629 18 6 15.3137 6 12C6 8.68629 8.68629 6 12 6C15.3137 6 18 8.68629 18 12C18 15.3137 15.3137 18 12 18ZM12 16C14.2091 16 16 14.2091 16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16ZM11 1H13V4H11V1ZM11 20H13V23H11V20ZM3.51472 4.92893L4.92893 3.51472L7.05025 5.63604L5.63604 7.05025L3.51472 4.92893ZM16.9497 18.364L18.364 16.9497L20.4853 19.0711L19.0711 20.4853L16.9497 18.364ZM19.0711 3.51472L20.4853 4.92893L18.364 7.05025L16.9497 5.63604L19.0711 3.51472ZM5.63604 16.9497L7.05025 18.364L4.92893 20.4853L3.51472 19.0711L5.63604 16.9497ZM23 11V13H20V11H23ZM4 11V13H1V11H4Z" fill="currentColor"></path></svg>
+</span>
+    </button>
+    
+  </div>
+</footer>
+
+  </main>
+</div>
+
+  
+<script src="/js/lightense.min.js"></script>
+
+
+  <script src="https://agourlay.github.io/js/main.js"></script>
+</body>
+
+</html>

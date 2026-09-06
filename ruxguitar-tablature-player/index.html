@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  
+    
+  <meta name="description" content="Introducing Ruxguitar, a guitar tablature player written in Rust">
+<link rel="canonical" href="https://agourlay.github.io/ruxguitar-tablature-player/">
+<meta property="og:site_name" content="Arnaud Gourlay&#x27;s blog">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Playing guitar tablatures in Rust">
+<meta property="og:description" content="Introducing Ruxguitar, a guitar tablature player written in Rust">
+<meta property="og:url" content="https://agourlay.github.io/ruxguitar-tablature-player/">
+<meta property="og:locale" content="en">
+
+
+<meta property="article:published_time" content="2024-07-14">
+
+<meta property="article:tag" content="Rust">
+<meta property="article:tag" content="music">
+<meta property="article:tag" content="ruxguitar">
+
+
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Playing guitar tablatures in Rust">
+<meta name="twitter:description" content="Introducing Ruxguitar, a guitar tablature player written in Rust">
+
+
+
+  <title>Playing guitar tablatures in Rust</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="https://agourlay.github.io/img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://agourlay.github.io/img/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://agourlay.github.io/img/apple-touch-icon.png">
+  
+  <style>
+
+  /* light mode colors */
+  body {
+    --primary-color: #5871a2;
+    --primary-pale-color: #5871a233;
+    --primary-decoration-color: #5871a210;
+    --bg-color: #ffffff;
+    --text-color: #2f3030;
+    --text-pale-color: #767676;
+    --text-decoration-color: #a9a9a9;
+    --highlight-mark-color: #5f75b020;
+
+    --callout-note-color: #5871a2;
+    --callout-tip-color: #268556;
+    --callout-important-color: #885fc9;
+    --callout-warning-color: #ab6632;
+    --callout-caution-color: #c64e4e;
+  }
+
+  /* dark mode colors */
+  body.dark {
+    --primary-color: #6f8fd1;
+    --primary-pale-color: #6f8fd166;
+    --primary-decoration-color: #6f8fd112;
+    --bg-color: #1c1c1c;
+    --text-color: #c1c1c1;
+    --text-pale-color: #848484;
+    --text-decoration-color: #5f5f5f;
+    --highlight-mark-color: #8296cb3b;
+
+    --callout-note-color: #6f8fd1;
+    --callout-tip-color: #47976f;
+    --callout-important-color: #9776cd;
+    --callout-warning-color: #ad7a52;
+    --callout-caution-color: #d06161;
+  }
+
+  /* typography */
+  body {
+    --main-font: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --code-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    --homepage-max-width: 768px;
+    --main-max-width: 768px;
+    --avatar-size: 60px;
+    --font-size: 16px;
+    --line-height: 1.75;
+    --img-border-radius: 0px;
+    --detail-border-radius: 0px;
+    --dark-mode-img-brightness: 0.75;
+    --dark-mode-chart-brightness: 0.75;
+    --inline-code-border-radius: 2px;
+    --inline-code-bg-color: var(--primary-decoration-color);
+    --block-code-border-radius: 0px;
+    --block-code-border-color: var(--primary-color);
+    --detail-border-color: var(--primary-color);
+  }
+
+</style>
+
+  <link rel="stylesheet" href="https://agourlay.github.io/main.css">
+  
+
+<link id="hl" rel="stylesheet" type="text/css" href="/giallo-light.css" />
+
+
+
+  <style>
+  /* Avatar: crop to fill the circle instead of distorting a non-square image */
+  #info img { object-fit: cover; object-position: center 22%; }
+  /* Footer: stack the copyright and sponsor lines instead of running them together
+     (Serene's `footer .left` is a flex row, meant for a single line) */
+  footer .left { flex-direction: column; align-items: flex-start; gap: 3px; }
+  /* Float the footer controls (RSS + theme toggle) to a fixed top-right cluster so
+     they're visible on landing without scrolling. Same elements, so main.js still works. */
+  footer .right {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    z-index: 50;
+    margin: 0;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 10px;
+    background: rgba(128, 128, 128, 0.12);
+  }
+  footer .right:hover { background: rgba(128, 128, 128, 0.20); }
+  footer .right #theme-toggle { transform: none; }
+</style>
+
+</head>
+
+<body class="post">
+  
+  <script>
+    const theme = sessionStorage.getItem('theme');
+    const match = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if ((theme && theme == 'dark') || (!theme && match)) {
+      document.body.classList.add('dark');
+      const hl = document.querySelector('link#hl');
+      if (hl) hl.href = 'https://agourlay.github.io/giallo-dark.css';
+    }
+  </script>
+  
+  
+<div id="wrapper">
+  <div id="blank"></div>
+  <aside>
+    
+    
+    <nav>
+      <ul>
+        
+        <li>
+          <a class="h2" href="#introducing-ruxguitar">Introducing Ruxguitar</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#parsing-the-tablature">Parsing the tablature</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#building-a-ui">Building a UI</a>
+          
+          <ul>
+            
+            <li>
+              <a class="h3" href="#iced">Iced</a>
+            </li>
+            
+            <li>
+              <a class="h3" href="#drawing-the-tablature">Drawing the tablature</a>
+            </li>
+            
+          </ul>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#making-sounds">Making sounds</a>
+          
+          <ul>
+            
+            <li>
+              <a class="h3" href="#synthesizing-midi-events">Synthesizing MIDI events</a>
+            </li>
+            
+            <li>
+              <a class="h3" href="#audio-loop">Audio loop</a>
+            </li>
+            
+          </ul>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#putting-it-all-together">Putting it all together</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#future-work">Future work</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#conclusion">Conclusion</a>
+          
+        </li>
+        
+      </ul>
+    </nav>
+    
+    
+    <button id="back-to-top" aria-label="back to top">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-arrow-up"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+
+    </button>
+    
+  </aside>
+  <main>
+    
+<header>
+  <nav>
+    <a id="back-link" href="https:&#x2F;&#x2F;agourlay.github.io&#x2F;posts">← Back</a>
+  </nav>
+</header>
+
+
+    <div>
+      
+      
+      
+      
+      <div id="copy-cfg" style="display: none;" data-copy-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M6.9998 6V3C6.9998 2.44772 7.44752 2 7.9998 2H19.9998C20.5521 2 20.9998 2.44772 20.9998 3V17C20.9998 17.5523 20.5521 18 19.9998 18H16.9998V20.9991C16.9998 21.5519 16.5499 22 15.993 22H4.00666C3.45059 22 3 21.5554 3 20.9991L3.0026 7.00087C3.0027 6.44811 3.45264 6 4.00942 6H6.9998ZM5.00242 8L5.00019 20H14.9998V8H5.00242ZM8.9998 6H16.9998V16H18.9998V4H8.9998V6Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+" data-check-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M10.0007 15.1709L19.1931 5.97852L20.6073 7.39273L10.0007 17.9993L3.63672 11.6354L5.05093 10.2212L10.0007 15.1709Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+"></div>
+      
+      <article class="prose">
+        <h1>Playing guitar tablatures in Rust</h1>
+        <div id="post-info">
+          <div id="date">
+            <span id="publish">14 July 2024</span>
+            </div>
+
+          
+          <div id="tags">
+            <a class="instant" href="https://agourlay.github.io/tags/rust"><span>#</span>Rust</a><a class="instant" href="https://agourlay.github.io/tags/music"><span>#</span>music</a><a class="instant" href="https://agourlay.github.io/tags/ruxguitar"><span>#</span>ruxguitar</a>
+          </div>
+          
+        </div>
+
+        
+        
+
+        
+
+        <p>If you ever tried to learn guitar, chances are you are familiar with guitar tablatures.</p>
+<p>It is a simple way to visualize music for guitar, using ASCII characters to represent strings and frets as an alternative to sheet music.</p>
+<p>For instance, here are the first four measures of the song "Smoke on the Water" by Deep Purple:</p>
+<pre class="giallo z-code"><code data-lang="plain"><span class="giallo-l"><span>e|-----------------|-----------------|-----------------|-----------------|</span></span>
+<span class="giallo-l"><span>B|-----------------|-----------------|-----------------|-----------------|</span></span>
+<span class="giallo-l"><span>G|-----3---5-------|---3---6-5-------|-----3---5-----3-|-----------------|</span></span>
+<span class="giallo-l"><span>D|-5---3---5-----5-|---3---6-5-------|-5---3---5-----3-|---5-------------|</span></span>
+<span class="giallo-l"><span>A|-5-------------5-|-----------------|-5---------------|---5-------------|</span></span>
+<span class="giallo-l"><span>E|-----------------|-----------------|-----------------|-----------------| &lt;- top</span></span></code></pre>
+<p>This song is played in standard tuning (EADGBe), which is conveyed by the letters on the left indicating the tuning for each string, while the numbers indicate where to put your fingers on the fretboard.</p>
+<p>Beyond the text representation, the de facto standard is the format used by the <a rel="nofollow noreferrer external" href="https://www.guitar-pro.com/">Guitar Pro</a> software to render and synthesize sound for the tablature.</p>
+<p>Those binary files have the <code>.gp3</code>, <code>.gp4</code>, <code>.gp5</code> or <code>.gp6</code> extension depending on the software version used to produce them, and can be easily found on the internet on websites such as <a rel="nofollow noreferrer external" href="https://www.ultimate-guitar.com/">Ultimate Guitar</a>.</p>
+<p>Although the software to play the tablature is proprietary, some versions of the file format are well documented, and there are even open-source projects that can read them.</p>
+<p>The best OSS tablature player is probably <a rel="nofollow noreferrer external" href="https://sourceforge.net/projects/tuxguitar/">TuxGuitar</a> which is very feature-rich and a fantastic tool to learn guitar.</p>
+<p>Since <code>TuxGuitar</code> appears to be unmaintained and Java-based, I thought it would be a fun challenge to write my own tablature player in Rust.</p>
+<h1 id="introducing-ruxguitar">Introducing Ruxguitar<a class="zola-anchor" href="#introducing-ruxguitar" aria-label="Anchor link for: introducing-ruxguitar" style="visibility: hidden;"></a>
+</h1>
+<p>I named my project <code>Ruxguitar</code>, a portmanteau of <code>Rust</code> and <code>Guitar</code>.</p>
+<p>The project is still in its early stages, but I believe it is now functional enough to be officially announced to the world - aka this very blog post!</p>
+<p>Rather than describing what the project does, have a look at the following video which shows the tablature player in action with a song a bit more complex:</p>
+<video id="myVideo" controls width="640" height="480" style="margin: auto;">
+  <source src="/2024-07-14/ruxguitar.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+<p>You can obviously find the source code on <a rel="nofollow noreferrer external" href="https://github.com/agourlay/ruxguitar">GitHub</a> with pre-built <a rel="nofollow noreferrer external" href="https://github.com/agourlay/ruxguitar/releases">binaries</a> available for Linux, macOS and Windows.</p>
+<p>Feel free to go play with it and come back when you want to read the rest of this post which will detail various aspects of the internals.</p>
+<h1 id="parsing-the-tablature">Parsing the tablature<a class="zola-anchor" href="#parsing-the-tablature" aria-label="Anchor link for: parsing-the-tablature" style="visibility: hidden;"></a>
+</h1>
+<p>The first step in building a tablature player is to parse the binary tablature file.</p>
+<p>During my research, I found a specification of the <code>.gp4</code> file format on <a rel="nofollow noreferrer external" href="https://dguitar.sourceforge.net/GP4format.html">dguitar</a> to get started.</p>
+<p>The structure of the file is roughly the following:</p>
+<ol>
+<li>file version to know which version of the file format is used</li>
+<li>information about the piece (e.g. title, subtitle, artist, album, etc.)</li>
+<li>lyrics</li>
+<li>number of measures and number of tracks</li>
+<li>measures per track in the following order:
+<ul>
+<li>measure 1/track 1</li>
+<li>measure 1/track 2</li>
+<li>...</li>
+<li>measure 1/track m</li>
+<li>measure 2/track 1</li>
+<li>measure 2/track 2</li>
+<li>...</li>
+<li>measure 2/track m</li>
+<li>...</li>
+<li>measure n/track 1</li>
+<li>measure n/track 2</li>
+<li>...</li>
+<li>measure n/track m</li>
+</ul>
+</li>
+<li>within each measure, we find the number of beats to read</li>
+<li>within each beat, we find the beat duration and the number of notes to read</li>
+<li>within each note, we find the string, the fret, the duration, the effect, etc.</li>
+</ol>
+<p>I decided to use the <a rel="nofollow noreferrer external" href="https://github.com/rust-bakery/nom">nom</a> crate to parse the tablature because I am <a rel="nofollow noreferrer external" href="https://github.com/agourlay/hprof-slurp">familiar</a> with it for parsing binary format.</p>
+<p>Here is a quick peek at the code driving the parser so you get an idea of how it looks:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">pub</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> parse_gp_data</span><span>(</span><span class="z-variable z-other">file_data</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span>[</span><span class="z-entity z-name">u8</span><span>]</span><span>)</span><span class="z-keyword"> -&gt;</span><span class="z-entity z-name"> Result</span><span>&lt;</span><span class="z-entity z-name">Song</span><span>,</span><span class="z-entity z-name"> RuxError</span><span>&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span> (</span><span class="z-variable z-other">rest</span><span>,</span><span class="z-variable z-other"> base_song</span><span>)</span><span class="z-keyword"> =</span><span class="z-entity z-name"> flat_map</span><span>(</span><span class="z-variable z-other">parse_gp_version</span><span>,</span><span class="z-keyword"> |</span><span class="z-variable z-other">version</span><span class="z-keyword">|</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        map</span><span>(</span></span>
+<span class="giallo-l"><span class="z-entity z-name">            tuple</span><span>(</span><span>(</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                parse_info</span><span>(</span><span class="z-variable z-other">version</span><span>)</span><span>,</span><span>                                     </span></span>
+<span class="giallo-l"><span class="z-entity z-name">                cond</span><span>(</span><span class="z-variable z-other">version</span><span class="z-keyword"> &lt;</span><span class="z-entity z-name"> GpVersion</span><span class="z-keyword">::</span><span class="z-constant">GP5</span><span>,</span><span class="z-variable z-other"> parse_bool</span><span>)</span><span>,</span><span>              </span></span>
+<span class="giallo-l"><span class="z-entity z-name">                cond</span><span>(</span><span class="z-variable z-other">version</span><span class="z-keyword"> &gt;=</span><span class="z-entity z-name"> GpVersion</span><span class="z-keyword">::</span><span class="z-constant">GP4</span><span>,</span><span class="z-variable z-other"> parse_lyrics</span><span>)</span><span>,</span><span>           </span></span>
+<span class="giallo-l"><span class="z-entity z-name">                cond</span><span>(</span><span class="z-variable z-other">version</span><span class="z-keyword"> &gt;=</span><span class="z-entity z-name"> GpVersion</span><span class="z-keyword">::</span><span class="z-constant">GP5_10</span><span>,</span><span class="z-entity z-name"> take</span><span>(</span><span class="z-constant">19</span><span class="z-entity z-name">usize</span><span>)</span><span>)</span><span>,</span><span>       </span></span>
+<span class="giallo-l"><span class="z-entity z-name">                cond</span><span>(</span><span class="z-variable z-other">version</span><span class="z-keyword"> &gt;=</span><span class="z-entity z-name"> GpVersion</span><span class="z-keyword">::</span><span class="z-constant">GP5</span><span>,</span><span class="z-variable z-other"> parse_page_setup</span><span>)</span><span>,</span><span>       </span></span>
+<span class="giallo-l"><span class="z-entity z-name">                cond</span><span>(</span><span class="z-variable z-other">version</span><span class="z-keyword"> &gt;=</span><span class="z-entity z-name"> GpVersion</span><span class="z-keyword">::</span><span class="z-constant">GP5</span><span>,</span><span class="z-variable z-other"> parse_int_sized_string</span><span>)</span><span>,</span><span> </span></span>
+<span class="giallo-l"><span class="z-variable z-other">                parse_int</span><span>,</span><span>                                               </span></span>
+<span class="giallo-l"><span class="z-entity z-name">                cond</span><span>(</span><span class="z-variable z-other">version</span><span class="z-keyword"> &gt;</span><span class="z-entity z-name"> GpVersion</span><span class="z-keyword">::</span><span class="z-constant">GP5</span><span>,</span><span class="z-variable z-other"> parse_bool</span><span>)</span><span>,</span><span>              </span></span>
+<span class="giallo-l"><span class="z-variable z-other">                parse_signed_byte</span><span>,</span><span>                                       </span></span>
+<span class="giallo-l"><span class="z-entity z-name">                cond</span><span>(</span><span class="z-variable z-other">version</span><span class="z-keyword"> &gt;</span><span class="z-entity z-name"> GpVersion</span><span class="z-keyword">::</span><span class="z-constant">GP3</span><span>,</span><span class="z-variable z-other"> parse_int</span><span>)</span><span>,</span><span>               </span></span>
+<span class="giallo-l"><span class="z-variable z-other">                parse_midi_channels</span><span>,</span><span>                                     </span></span>
+<span class="giallo-l"><span>            )</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span class="z-keyword">            move</span><span class="z-keyword"> |</span><span>(</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                song_info</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                triplet_feel</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                lyrics</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                _master_effect</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                page_setup</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                tempo_name</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                tempo</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                hide_tempo</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                key_signature</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                octave</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                midi_channels</span><span>,</span></span>
+<span class="giallo-l"><span>            )</span><span class="z-keyword">|</span><span> {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">                //</span><span class="z-comment"> init base song</span></span>
+<span class="giallo-l"><span class="z-storage z-type">                let</span><span class="z-variable z-other"> tempo</span><span class="z-keyword"> =</span><span class="z-entity z-name"> Tempo</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">tempo</span><span>,</span><span class="z-variable z-other"> tempo_name</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                Song</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    version</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    song_info</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    triplet_feel</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    lyrics</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    page_setup</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    tempo</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    hide_tempo</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    key_signature</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    octave</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    midi_channels</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    measure_headers</span><span class="z-keyword">:</span><span class="z-entity z-name"> vec!</span><span>[</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">                    tracks</span><span class="z-keyword">:</span><span class="z-entity z-name"> vec!</span><span>[</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>                }</span></span>
+<span class="giallo-l"><span>            }</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span></span>
+<span class="giallo-l"><span>    }</span><span>)</span><span>(</span><span class="z-variable z-other">file_data</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">    .</span><span class="z-entity z-name">map_err</span><span>(</span><span class="z-keyword">|</span><span class="z-variable z-other">_err</span><span class="z-keyword">|</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        log</span><span class="z-keyword">::</span><span class="z-entity z-name">error!</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">Failed to parse GP data</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        RuxError</span><span class="z-keyword">::</span><span class="z-entity z-name">ParsingError</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">Failed to parse GP data</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-keyword">.</span><span class="z-entity z-name">to_string</span><span>(</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>    }</span><span>)</span><span class="z-keyword">?</span><span>;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> parse tracks &amp; measures</span></span>
+<span class="giallo-l"><span class="z-keyword">    ...</span></span></code></pre>
+<p>The heavy lifting required to parse the tracks and the measures is done in a different function that will be skipped for brevity.</p>
+<p>At some point it became quite tedious to handle the various versions of the file format and I decided to focus on the <code>.gp5</code> version which is widely used.</p>
+<p>To be honest, this part was rather challenging because the file format is quite complex and the documentation is not always clear.</p>
+<p>Luckily I was able to inspect the parsers from <code>TuxGuitar</code> and the <a rel="nofollow noreferrer external" href="https://github.com/slundi/guitarpro">guitarpro</a> crate to get a better understanding of the file format.</p>
+<p>To ensure correctness, I have written a few unit tests for specific tablature files to check that the parser is working as expected.</p>
+<p>This approach is useful to get started but not very scalable, so I am also validating some high level invariants of the resulting <code>Song</code> structure over a directory containing several hundred tablatures.</p>
+<p>I found a few bugs in the parser this way, and I am confident that the parser is working as expected.</p>
+<h1 id="building-a-ui">Building a UI<a class="zola-anchor" href="#building-a-ui" aria-label="Anchor link for: building-a-ui" style="visibility: hidden;"></a>
+</h1>
+<p>At this point, we have an in-memory representation of the tablature but no way to display it.</p>
+<p>Not only should the user be able to see the tablature but also be able to interact with it.</p>
+<p>I really wanted to use a native GUI library to ensure that the application would look and feel like a native application on all platforms.</p>
+<p>The <a rel="nofollow noreferrer external" href="https://areweguiyet.com/">state</a> of GUI libraries in Rust required me to do some research.</p>
+<p>I needed a truly event-based library to handle the synchronization during playback while also being able to draw the tablature in a custom way with some kind of canvas abstraction.</p>
+<p>Based on those requirements, I decided to give <a rel="nofollow noreferrer external" href="https://iced.rs/">Iced</a> a spin as it checked all the boxes.</p>
+<p>Spoiler alert: I am very happy with my choice so I did not try other libraries.</p>
+<h2 id="iced">Iced<a class="zola-anchor" href="#iced" aria-label="Anchor link for: iced" style="visibility: hidden;"></a>
+</h2>
+<p>The <code>Iced</code> library is very well written but could benefit from a bit more documentation.</p>
+<p>I recommend reading the source code of the <a rel="nofollow noreferrer external" href="https://github.com/iced-rs/iced/tree/master/examples">examples</a> to get a better understanding of how to use the library.</p>
+<p>I started with the <a rel="nofollow noreferrer external" href="https://github.com/iced-rs/iced/tree/master/examples/editor">text editor</a> example which I slowly adapted to my needs.</p>
+<p>At some point, I ran into a bug in version <code>0.12.0</code> which forced me to upgrade to the <code>0.13.0</code> version which was not released yet.</p>
+<p>This means I had to use the <code>main</code> branch of the <code>Iced</code> repository which was a bit scary but it worked out fine.</p>
+<p>All the breakages I encountered were due to the <code>Iced</code> library being in active development and I am very grateful to the maintainers for their hard work.</p>
+<p>The library is architected around messages and subscriptions that trigger the update of the UI.</p>
+<p>For instance, those are my messages:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span>#</span><span>[</span><span>derive</span><span>(</span><span class="z-entity z-name">Debug</span><span>,</span><span class="z-entity z-name"> Clone</span><span>)</span><span>]</span></span>
+<span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> enum</span><span class="z-entity z-name"> Message</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    OpenFile</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> open file dialog</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    FileOpened</span><span>(</span><span class="z-entity z-name">Result</span><span>&lt;</span><span>(</span><span class="z-entity z-name">Vec</span><span>&lt;</span><span class="z-entity z-name">u8</span><span>&gt;</span><span>,</span><span class="z-entity z-name"> String</span><span>)</span><span>,</span><span class="z-entity z-name"> PickerError</span><span>&gt;</span><span>)</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> file content &amp; file name</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    TrackSelected</span><span>(</span><span class="z-entity z-name">TrackSelection</span><span>)</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> track selection</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    FocusMeasure</span><span>(</span><span class="z-entity z-name">usize</span><span>)</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> used when clicking on measure in tablature</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    FocusTick</span><span>(</span><span class="z-entity z-name">usize</span><span>)</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> focus on a specific tick in the tablature</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    PlayPause</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> toggle play/pause</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    StopPlayer</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> stop playback</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    ToggleSolo</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> toggle solo mode</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>And this is the simplified application entry point:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">impl</span><span class="z-entity z-name"> RuxApplication</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">    pub</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> start</span><span>(</span><span class="z-variable z-other">args</span><span class="z-keyword">:</span><span class="z-entity z-name"> ApplicationArgs</span><span>)</span><span class="z-keyword"> -&gt;</span><span class="z-entity z-name"> iced</span><span class="z-keyword">::</span><span class="z-entity z-name">Result</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        iced</span><span class="z-keyword">::</span><span class="z-entity z-name">application</span><span>(</span></span>
+<span class="giallo-l"><span class="z-entity z-name">            RuxApplication</span><span class="z-keyword">::</span><span class="z-variable z-other">title</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">            RuxApplication</span><span class="z-keyword">::</span><span class="z-variable z-other">update</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">            RuxApplication</span><span class="z-keyword">::</span><span class="z-variable z-other">view</span><span>,</span></span>
+<span class="giallo-l"><span>        )</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">subscription</span><span>(</span><span class="z-entity z-name">RuxApplication</span><span class="z-keyword">::</span><span class="z-variable z-other">subscription</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">theme</span><span>(</span><span class="z-entity z-name">RuxApplication</span><span class="z-keyword">::</span><span class="z-variable z-other">theme</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">font</span><span>(</span><span class="z-constant">ICONS_FONT</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">centered</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">antialiasing</span><span>(</span><span class="z-constant">true</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">run</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>The application is built around functions that are orchestrated by the <code>Iced</code> engine appropriately.</p>
+<p>The <code>update</code> function has the signature <code>Fn(&amp;mut State, Message) -&gt; C</code> where:</p>
+<ul>
+<li><code>State</code> is the application state that can be modified (here <code>RuxApplication</code>)</li>
+<li><code>Message</code> is the message to process</li>
+<li><code>C</code> is an output <code>Task</code> potentially producing a new <code>Message</code></li>
+</ul>
+<p>The <code>view</code> function has the signature <code>Fn(&amp;'a State) -&gt; Widget</code> and renders a <code>Widget</code> based on the current <code>&amp;State</code>.</p>
+<h2 id="drawing-the-tablature">Drawing the tablature<a class="zola-anchor" href="#drawing-the-tablature" aria-label="Anchor link for: drawing-the-tablature" style="visibility: hidden;"></a>
+</h2>
+<p>I started by crafting the code which carefully draws a single measure on an <code>Iced::Canvas</code>.</p>
+<p>This means:</p>
+<ul>
+<li>drawing each string</li>
+<li>for each beat, drawing the notes on the strings and potential beat effect (e.g. palm mute)</li>
+<li>for each note, adding the potential note effect (e.g. slide, hammer-on, bend)</li>
+<li>annotate the measure with additional information (e.g. measure number, tempo, part annotation, chord)</li>
+</ul>
+<p>It required a bit of trial and error to get the offsets right but I am happy with the result.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2024-07-14&#x2F;measure.png"
+         alt="single measure"
+        
+        
+    >
+    
+</figure>
+<p>Once I have a collection of canvas measures, they are assembled in a responsive grid layout to display the whole tablature using the <code>wrap</code> widget from the <a rel="nofollow noreferrer external" href="https://github.com/iced-rs/iced_aw">iced-aw</a> crate.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2024-07-14&#x2F;grid.png"
+         alt="grid measures"
+        
+        
+    >
+    
+</figure>
+<p>The measures can have different lengths depending on the number of beats which makes silent measures very small and crazy guitar solo measures long.</p>
+<h1 id="making-sounds">Making sounds<a class="zola-anchor" href="#making-sounds" aria-label="Anchor link for: making-sounds" style="visibility: hidden;"></a>
+</h1>
+<p>To recap, we have an in-memory representation of a tablature and we have the UI, now we need to make some sounds!</p>
+<p>What we want is a way to turn each note, for each beat, for each measure, for each track into a specific sound at the <strong>right</strong> time.</p>
+<p>This can be achieved using a MIDI synthesizer which is software that can produce sounds based on MIDI events.</p>
+<h2 id="synthesizing-midi-events">Synthesizing MIDI events<a class="zola-anchor" href="#synthesizing-midi-events" aria-label="Anchor link for: synthesizing-midi-events" style="visibility: hidden;"></a>
+</h2>
+<p>There are different kinds of MIDI events but the most important for us are the <code>NoteOn</code> and <code>NoteOff</code> ones.</p>
+<ul>
+<li>Note On: Indicates that a note is being pressed. It includes the note number (pitch) and velocity (how hard the note is pressed).</li>
+<li>Note Off: Indicates that a note is being released.</li>
+</ul>
+<p>For each note in the tablature, we can generate a pair of MIDI events annotated with:</p>
+<ul>
+<li>the timestamp, also referred to as a tick, at which they should be executed.</li>
+<li>the track to which they belong.</li>
+</ul>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> enum</span><span class="z-entity z-name"> MidiEventType</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    NoteOn</span><span>(</span><span class="z-entity z-name">i32</span><span>,</span><span class="z-entity z-name"> i32</span><span>,</span><span class="z-entity z-name"> i16</span><span>)</span><span>,</span><span class="z-punctuation z-definition z-comment">  //</span><span class="z-comment"> midi channel, note, velocity</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    NoteOff</span><span>(</span><span class="z-entity z-name">i32</span><span>,</span><span class="z-entity z-name"> i32</span><span>)</span><span>,</span><span class="z-punctuation z-definition z-comment">      //</span><span class="z-comment"> midi channel, note</span></span>
+<span class="giallo-l"><span class="z-keyword">    ...</span></span>
+<span class="giallo-l"><span>}</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-keyword">pub</span><span class="z-storage z-type"> struct</span><span class="z-entity z-name"> MidiEvent</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">    pub</span><span class="z-variable z-other"> tick</span><span class="z-keyword">:</span><span class="z-entity z-name"> usize</span><span>,</span></span>
+<span class="giallo-l"><span class="z-keyword">    pub</span><span class="z-variable z-other"> event</span><span class="z-keyword">:</span><span class="z-entity z-name"> MidiEventType</span><span>,</span></span>
+<span class="giallo-l"><span class="z-keyword">    pub</span><span class="z-variable z-other"> track</span><span class="z-keyword">:</span><span class="z-entity z-name"> usize</span><span>,</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>All those events are pushed into a single array sorted by the event tick.</p>
+<p>This approach provides an efficient way to find the next events to play at any given time via binary search later on.</p>
+<p>Those <code>MidiEvents</code> can be transformed into audio waves using a synthesizer before being sent to the audio output.</p>
+<p>For the synthesizer I settled on the <a rel="nofollow noreferrer external" href="https://github.com/sinshu/rustysynth">rustysynth</a> crate which provides a neat MIDI synthesizer.</p>
+<p>Here is a simplified version of the code to play a MIDI event:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> synthesizer_settings</span><span class="z-keyword"> =</span><span class="z-entity z-name"> SynthesizerSettings</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-constant">SAMPLE_RATE</span><span class="z-keyword"> as</span><span class="z-entity z-name"> i32</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> synthesizer</span><span class="z-keyword"> =</span><span class="z-entity z-name"> Synthesizer</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-variable z-other">sound_font</span><span>,</span><span class="z-keyword"> &amp;</span><span class="z-variable z-other">synthesizer_settings</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> midi_event</span><span class="z-keyword"> =</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> find next event to play</span></span>
+<span class="giallo-l"><span class="z-keyword">match</span><span class="z-variable z-other"> midi_event</span><span class="z-keyword">.</span><span>event </span><span>{</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    MidiEventType</span><span class="z-keyword">::</span><span class="z-entity z-name">NoteOn</span><span>(</span><span class="z-variable z-other">channel</span><span>,</span><span class="z-variable z-other"> key</span><span>,</span><span class="z-variable z-other"> velocity</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        synthesizer</span><span class="z-keyword">.</span><span class="z-entity z-name">note_on</span><span>(</span><span class="z-variable z-other">channel</span><span>,</span><span class="z-variable z-other"> key</span><span>,</span><span class="z-variable z-other"> velocity</span><span class="z-keyword"> as</span><span class="z-entity z-name"> i32</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    MidiEventType</span><span class="z-keyword">::</span><span class="z-entity z-name">NoteOff</span><span>(</span><span class="z-variable z-other">channel</span><span>,</span><span class="z-variable z-other"> key</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        synthesizer</span><span class="z-keyword">.</span><span class="z-entity z-name">note_off</span><span>(</span><span class="z-variable z-other">channel</span><span>,</span><span class="z-variable z-other"> key</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span class="z-keyword">    ...</span></span>
+<span class="giallo-l"><span>}</span><span>                    </span></span></code></pre>
+<p>It is important to note that a synthesizer requires a soundfont file to produce sound.</p>
+<p>For the sake of simplicity, I included the <code>TimGM6mb.sf2</code> soundfont file in the binary at compile time.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">const</span><span class="z-constant"> TIMIDITY_SOUND_FONT</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span>[</span><span class="z-entity z-name">u8</span><span>]</span><span class="z-keyword"> =</span><span class="z-entity z-name"> include_bytes!</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">../../resources/TimGM6mb.sf2</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span></code></pre>
+<p>The trade-off is that the binary is a bit larger but the user does not have to worry about finding the soundfont file.</p>
+<p>However, it is possible to provide a larger soundfont file to get better sound quality using the <code>--sound-font-file</code> command line argument.</p>
+<p>For instance, I like to use <code>FluidR3_GM.sf2</code> which is present on most systems and easy to find online (<a rel="nofollow noreferrer external" href="https://musical-artifacts.com/artifacts/738">here</a> or <a rel="nofollow noreferrer external" href="https://member.keymusician.com/Member/FluidR3_GM/index.html">there</a>).</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">./ruxguitar</span><span class="z-constant"> -</span><span class="z-constant">-sound-font-file</span><span class="z-string"> /usr/share/sounds/sf2/FluidR3_GM.sf2</span></span></code></pre><h2 id="audio-loop">Audio loop<a class="zola-anchor" href="#audio-loop" aria-label="Anchor link for: audio-loop" style="visibility: hidden;"></a>
+</h2>
+<p>The audio output stream is managed by a dedicated thread which will produce sound at a regular interval.</p>
+<p>I picked the <a rel="nofollow noreferrer external" href="https://github.com/RustAudio/cpal">cpal</a> crate which is a cross-platform audio library.</p>
+<p>Here is a simplified version of the code to set up an audio loop:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> host</span><span class="z-keyword"> =</span><span class="z-entity z-name"> cpal</span><span class="z-keyword">::</span><span class="z-entity z-name">default_host</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> device</span><span class="z-keyword"> =</span><span class="z-variable z-other"> host</span><span class="z-keyword">.</span><span class="z-entity z-name">default_output_device</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> config</span><span class="z-keyword"> =</span><span class="z-variable z-other"> device</span><span class="z-keyword">.</span><span class="z-entity z-name">default_output_config</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> stream_config</span><span class="z-keyword">:</span><span class="z-entity z-name"> cpal</span><span class="z-keyword">::</span><span class="z-entity z-name">StreamConfig</span><span class="z-keyword"> =</span><span class="z-variable z-other"> config</span><span class="z-keyword">.</span><span class="z-entity z-name">into</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> channels_count</span><span class="z-keyword"> =</span><span class="z-variable z-other"> stream_config</span><span class="z-keyword">.</span><span>channels </span><span class="z-keyword">as</span><span class="z-entity z-name"> usize</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">assert_eq!</span><span>(</span><span class="z-variable z-other">channels_count</span><span>,</span><span class="z-constant"> 2</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> 4410 samples at 44100 Hz is 0.1 second</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> mono_sample_count</span><span class="z-keyword"> =</span><span class="z-constant"> 4410</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> left</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">f32</span><span>&gt;</span><span class="z-keyword"> =</span><span class="z-entity z-name"> vec!</span><span>[</span><span class="z-constant">0_</span><span class="z-entity z-name">f32</span><span>;</span><span class="z-variable z-other"> mono_sample_count</span><span>]</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> right</span><span class="z-keyword">:</span><span class="z-entity z-name"> Vec</span><span>&lt;</span><span class="z-entity z-name">f32</span><span>&gt;</span><span class="z-keyword"> =</span><span class="z-entity z-name"> vec!</span><span>[</span><span class="z-constant">0_</span><span class="z-entity z-name">f32</span><span>;</span><span class="z-variable z-other"> mono_sample_count</span><span>]</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> build audio loop</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> stream</span><span class="z-keyword"> =</span><span class="z-variable z-other"> device</span><span class="z-keyword">.</span><span class="z-entity z-name">build_output_stream</span><span>(</span></span>
+<span class="giallo-l"><span class="z-keyword">    &amp;</span><span class="z-variable z-other">stream_config</span><span>,</span></span>
+<span class="giallo-l"><span class="z-keyword">    move</span><span class="z-keyword"> |</span><span class="z-variable z-other">output</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span class="z-storage">mut</span><span> [</span><span class="z-entity z-name">f32</span><span>]</span><span>,</span><span class="z-variable z-other"> _</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span class="z-entity z-name">cpal</span><span class="z-keyword">::</span><span class="z-entity z-name">OutputCallbackInfo</span><span class="z-keyword">|</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">        let</span><span class="z-variable z-other"> midi_events</span><span class="z-keyword"> =</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> find events to play</span></span>
+<span class="giallo-l"><span class="z-keyword">        for</span><span class="z-variable z-other"> event</span><span class="z-keyword"> in</span><span class="z-variable z-other"> midi_events</span><span> {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">            //</span><span class="z-comment"> synthesize events</span></span>
+<span class="giallo-l"><span class="z-variable z-other">            synthesizer</span><span class="z-keyword">.</span><span class="z-entity z-name">process</span><span>(</span><span class="z-variable z-other">event</span><span>)</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">        //</span><span class="z-comment"> Split buffer in two channels (left and right)</span></span>
+<span class="giallo-l"><span class="z-storage z-type">        let</span><span class="z-variable z-other"> channel_len</span><span class="z-keyword"> =</span><span class="z-variable z-other"> output</span><span class="z-keyword">.</span><span class="z-entity z-name">len</span><span>(</span><span>)</span><span class="z-keyword"> /</span><span class="z-variable z-other"> channels_count</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">        //</span><span class="z-comment"> Render the waveform.</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        synthesizer</span><span class="z-keyword">.</span><span class="z-entity z-name">render</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-storage">mut</span><span class="z-variable z-other"> left</span><span>[</span><span class="z-keyword">..</span><span class="z-variable z-other">channel_len</span><span>]</span><span>,</span><span class="z-keyword"> &amp;</span><span class="z-storage">mut</span><span class="z-variable z-other"> right</span><span>[</span><span class="z-keyword">..</span><span class="z-variable z-other">channel_len</span><span>]</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>        </span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">        //</span><span class="z-comment"> Interleave the left and right channels into the output buffer.</span></span>
+<span class="giallo-l"><span class="z-keyword">        for</span><span> (</span><span class="z-variable z-other">i</span><span>,</span><span> (</span><span class="z-variable z-other">l</span><span>,</span><span class="z-variable z-other"> r</span><span>)</span><span>)</span><span class="z-keyword"> in</span><span class="z-variable z-other"> left</span><span class="z-keyword">.</span><span class="z-entity z-name">iter</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">zip</span><span>(</span><span class="z-variable z-other">right</span><span class="z-keyword">.</span><span class="z-entity z-name">iter</span><span>(</span><span>)</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">take</span><span>(</span><span class="z-variable z-other">channel_len</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">enumerate</span><span>(</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">            output</span><span>[</span><span class="z-variable z-other">i</span><span class="z-keyword"> *</span><span class="z-constant"> 2</span><span>]</span><span class="z-keyword"> =</span><span class="z-keyword"> *</span><span class="z-variable z-other">l</span><span>;</span></span>
+<span class="giallo-l"><span class="z-variable z-other">            output</span><span>[</span><span class="z-variable z-other">i</span><span class="z-keyword"> *</span><span class="z-constant"> 2</span><span class="z-keyword"> +</span><span class="z-constant"> 1</span><span>]</span><span class="z-keyword"> =</span><span class="z-keyword"> *</span><span class="z-variable z-other">r</span><span>;</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> Start the stream.</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> stream</span><span class="z-keyword"> =</span><span class="z-variable z-other"> stream</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-variable z-other">stream</span><span class="z-keyword">.</span><span class="z-entity z-name">play</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>;</span></span></code></pre>
+<p>For each run of the audio loop, it is possible to compute the next window of time to process by taking into account:</p>
+<ul>
+<li>the current timestamp of the audio player</li>
+<li>the tempo of the current measure</li>
+<li>how much time has passed since the previous interval</li>
+</ul>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">const</span><span class="z-constant"> QUARTER_TIME</span><span class="z-keyword">:</span><span class="z-entity z-name"> i32</span><span class="z-keyword"> =</span><span class="z-constant"> 960</span><span>;</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> 1 quarter note = 960 ticks</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-keyword">fn</span><span class="z-entity z-name"> tick_increase</span><span>(</span><span class="z-variable z-other">tempo_bpm</span><span class="z-keyword">:</span><span class="z-entity z-name"> i32</span><span>,</span><span class="z-variable z-other"> elapsed_seconds</span><span class="z-keyword">:</span><span class="z-entity z-name"> f64</span><span>)</span><span class="z-keyword"> -&gt;</span><span class="z-entity z-name"> usize</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> tempo_bps</span><span class="z-keyword"> =</span><span class="z-variable z-other"> tempo_bpm</span><span class="z-keyword"> as</span><span class="z-entity z-name"> f64</span><span class="z-keyword"> /</span><span class="z-constant"> 60</span><span class="z-constant">.</span><span class="z-constant">0</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> bump</span><span class="z-keyword"> =</span><span class="z-constant"> QUARTER_TIME</span><span class="z-keyword"> as</span><span class="z-entity z-name"> f64</span><span class="z-keyword"> *</span><span class="z-variable z-other"> tempo_bps</span><span class="z-keyword"> *</span><span class="z-variable z-other"> elapsed_seconds</span><span>;</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    bump</span><span class="z-keyword"> as</span><span class="z-entity z-name"> usize</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>Using the resulting tick increase, we can efficiently query our array of MIDI events to find the next events to play using binary search.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> tick_increase</span><span class="z-keyword"> =</span><span class="z-entity z-name"> tick_increase</span><span>(</span><span class="z-variable z-other">tempo</span><span>,</span><span class="z-variable z-other"> elapsed_seconds</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> next_tick</span><span class="z-keyword"> =</span><span class="z-variable z-language"> self</span><span class="z-keyword">.</span><span>current_tick </span><span class="z-keyword">+</span><span class="z-variable z-other"> tick_increase</span><span>;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> assume we already have a cursor for the start of the events (a.k.a. the index of the last event played)</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> start_index</span><span class="z-keyword"> =</span><span class="z-variable z-language"> self</span><span class="z-keyword">.</span><span>current_cursor</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> end_index</span><span class="z-keyword"> =</span><span class="z-keyword"> match</span><span class="z-variable z-other"> sorted_events</span><span>[</span><span class="z-variable z-other">start_index</span><span class="z-keyword">..</span><span>]</span><span class="z-keyword">.</span><span class="z-entity z-name">binary_search_by_key</span><span>(</span><span class="z-variable z-other">start_index</span><span>,</span><span class="z-keyword"> |</span><span class="z-variable z-other">event</span><span class="z-keyword">|</span><span class="z-variable z-other"> event</span><span class="z-keyword">.</span><span>tick</span><span>)</span></span>
+<span class="giallo-l"><span>{</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Ok</span><span>(</span><span class="z-variable z-other">next_position</span><span>)</span><span class="z-keyword"> =&gt;</span><span class="z-variable z-other"> start_index</span><span class="z-keyword"> +</span><span class="z-variable z-other"> next_position</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Err</span><span>(</span><span class="z-variable z-other">next_position</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">        if</span><span class="z-variable z-other"> next_position</span><span class="z-keyword"> ==</span><span class="z-constant"> 0</span><span> {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">            //</span><span class="z-comment"> no matching elements</span></span>
+<span class="giallo-l"><span class="z-keyword">            return</span><span class="z-entity z-name"> Some</span><span>(</span><span class="z-keyword">&amp;</span><span>[</span><span>]</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">        //</span><span class="z-comment"> return slice until the last event</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        start_index</span><span class="z-keyword"> +</span><span class="z-variable z-other"> next_position</span><span class="z-keyword"> -</span><span class="z-constant"> 1</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>}</span><span>;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> return slice of events to play</span></span>
+<span class="giallo-l"><span class="z-keyword">return</span><span class="z-entity z-name"> Some</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-variable z-language">self</span><span class="z-keyword">.</span><span>sorted_events</span><span>[</span><span class="z-variable z-other">start_index</span><span class="z-keyword">..=</span><span class="z-variable z-other">end_index</span><span>]</span><span>)</span></span></code></pre>
+<p>Now that we have the audio loop running, we can focus on the integration between the audio player and the UI.</p>
+<h1 id="putting-it-all-together">Putting it all together<a class="zola-anchor" href="#putting-it-all-together" aria-label="Anchor link for: putting-it-all-together" style="visibility: hidden;"></a>
+</h1>
+<p>Having a perfect integration is crucial to providing a smooth user experience:</p>
+<ul>
+<li>
+<p>when clicking on the "Play" button, the tablature cursor should start moving, the notes should be highlighted as they are played.</p>
+</li>
+<li>
+<p>when a measure is clicked, the player should jump to the corresponding position in the tablature and the correct notes should be played.</p>
+</li>
+<li>
+<p>when clicking on a different track, the whole tablature should be updated to show the new track and the sound should be updated accordingly.</p>
+</li>
+<li>
+<p>when clicking on the "Solo" button, all other tracks should be muted.</p>
+</li>
+<li>
+<p>when clicking on the "Stop" button, the tablature cursor should be reset to the beginning and the sound should stop.</p>
+</li>
+</ul>
+<p>I think you get the idea.</p>
+<p>The critical bridge between the audio player and the UI is implemented using the <code>iced::Subscription</code> mechanism.</p>
+<p>Subscriptions are a way to listen to external events and publish them as messages to the application.</p>
+<p>For instance, here is how the application reacts to pressing the space bar to toggle the playback:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-variable z-other"> keyboard_subscription</span><span class="z-keyword"> =</span><span class="z-entity z-name"> keyboard</span><span class="z-keyword">::</span><span class="z-entity z-name">on_key_press</span><span>(</span><span class="z-keyword">|</span><span class="z-variable z-other">key</span><span>,</span><span class="z-variable z-other"> _modifiers</span><span class="z-keyword">|</span><span class="z-keyword"> match</span><span class="z-variable z-other"> key</span><span class="z-keyword">.</span><span class="z-entity z-name">as_ref</span><span>(</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    keyboard</span><span class="z-keyword">::</span><span class="z-entity z-name">Key</span><span class="z-keyword">::</span><span class="z-entity z-name">Named</span><span>(</span><span class="z-entity z-name">Space</span><span>)</span><span class="z-keyword"> =&gt;</span><span class="z-entity z-name"> Some</span><span>(</span><span class="z-entity z-name">Message</span><span class="z-keyword">::</span><span class="z-entity z-name">PlayPause</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    _</span><span class="z-keyword"> =&gt;</span><span class="z-entity z-name"> None</span><span>,</span></span>
+<span class="giallo-l"><span>}</span><span>)</span><span>;</span></span></code></pre>
+<p>The update function does not care whether the message has been triggered by the keyboard or by clicking on the "Play" button.</p>
+<p>Using a similar mechanism, the audio player can send messages to the application to update the UI based on the current playback position.</p>
+<p>The application holds the receiving end of a <a rel="nofollow noreferrer external" href="https://docs.rs/tokio/latest/tokio/sync/watch/index.html">tokio::sync::watch</a> channel containing the current timestamp which is published by the audio thread.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">fn</span><span class="z-entity z-name"> audio_player_beat_subscription</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-variable z-language">self</span><span>)</span><span class="z-keyword"> -&gt;</span><span class="z-keyword"> impl</span><span class="z-entity z-name"> Stream</span><span>&lt;</span><span class="z-entity z-name">Item</span><span class="z-keyword"> =</span><span class="z-entity z-name"> Message</span><span>&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> beat_receiver</span><span class="z-keyword"> =</span><span class="z-variable z-language"> self</span><span class="z-keyword">.</span><span>beat_receiver</span><span class="z-keyword">.</span><span class="z-entity z-name">clone</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    stream</span><span class="z-keyword">::</span><span class="z-entity z-name">channel</span><span>(</span><span class="z-constant">1</span><span>,</span><span class="z-keyword"> move</span><span class="z-keyword"> |</span><span class="z-storage">mut</span><span class="z-variable z-other"> output</span><span class="z-keyword">|</span><span class="z-keyword"> async</span><span class="z-keyword"> move</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">        let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> receiver</span><span class="z-keyword"> =</span><span class="z-variable z-other"> beat_receiver</span><span class="z-keyword">.</span><span class="z-entity z-name">lock</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-keyword">await</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">        loop</span><span> {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">            //</span><span class="z-comment"> get tick from audio player</span></span>
+<span class="giallo-l"><span class="z-storage z-type">            let</span><span class="z-variable z-other"> tick</span><span class="z-keyword"> =</span><span class="z-keyword"> *</span><span class="z-variable z-other">receiver</span><span class="z-keyword">.</span><span class="z-entity z-name">borrow_and_update</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">            //</span><span class="z-comment"> publish to UI</span></span>
+<span class="giallo-l"><span class="z-variable z-other">            output</span></span>
+<span class="giallo-l"><span class="z-keyword">                .</span><span class="z-entity z-name">send</span><span>(</span><span class="z-entity z-name">Message</span><span class="z-keyword">::</span><span class="z-entity z-name">FocusTick</span><span>(</span><span class="z-variable z-other">tick</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">                .</span><span class="z-keyword">await</span></span>
+<span class="giallo-l"><span class="z-keyword">                .</span><span class="z-entity z-name">expect</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">send failed</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">            //</span><span class="z-comment"> wait for next beat</span></span>
+<span class="giallo-l"><span class="z-variable z-other">            receiver</span><span class="z-keyword">.</span><span class="z-entity z-name">changed</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-keyword">await</span><span class="z-keyword">.</span><span class="z-entity z-name">expect</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">receiver failed</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    }</span><span>)</span></span>
+<span class="giallo-l"><span>}</span></span>
+<span class="giallo-l"><span class="z-keyword">...</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">//</span><span class="z-comment"> setup subscription</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Subscription</span><span class="z-keyword">::</span><span class="z-entity z-name">run_with_id</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">audio-player-beat</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-variable z-other"> audio_player_beat_subscription</span><span>)</span><span>)</span><span>;</span></span></code></pre>
+<p>The tablature processes the <code>FocusTick</code> message to update the current measure position and highlight the notes.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2024-07-14&#x2F;measure-cursor.gif"
+         alt="measure cursor"
+        
+        
+    >
+    
+</figure>
+<p>A <strong>lot</strong> of details were required to maintain the illusion that everything is properly synchronized with the user's actions.</p>
+<h1 id="future-work">Future work<a class="zola-anchor" href="#future-work" aria-label="Anchor link for: future-work" style="visibility: hidden;"></a>
+</h1>
+<p>The current version of <code>Ruxguitar</code> is pretty much an MVP to get the project started.</p>
+<p>It is nowhere near <code>TuxGuitar</code> in terms of features and usability.</p>
+<p>Here are a few ideas for the future:</p>
+<ul>
+<li>support more file formats (currently only <code>.gp5</code> is supported)</li>
+<li>display more information about the tablature (e.g. rhythm, time signature, key signature etc.)</li>
+<li>support repeating measures</li>
+<li>support slowing down and speeding up the playback</li>
+</ul>
+<h1 id="conclusion">Conclusion<a class="zola-anchor" href="#conclusion" aria-label="Anchor link for: conclusion" style="visibility: hidden;"></a>
+</h1>
+<p>I have been working on <code>Ruxguitar</code> over the past year and I am very happy with the result.</p>
+<p>Not only did I learn a lot on the way but I also actually built a complex piece of software that appears to work.</p>
+<p>Working on such a large project alone required a lot of discipline because there were many times when I felt like giving up, running into cryptic bugs or being stuck on a feature for weeks.</p>
+<p>It would have been impossible to build <code>Ruxguitar</code> without <code>TuxGuitar</code> as a reference implementation and I am very grateful for the work done by the <code>TuxGuitar</code> team over the years.</p>
+<p>After so much work on this project, it's about time I get back to playing guitar instead of writing software for it!</p>
+
+      </article>
+
+      
+      
+
+      
+      
+    </div>
+
+    <footer>
+  <div class="left">
+    <div class="copyright">
+      © 2026 Arnaud Gourlay
+      
+      <span>|</span>
+      Built with <a href="https://www.getzola.org" rel="noreferrer" target="_blank">zola</a> and <a href="https://github.com/isunjn/serene" rel="noreferrer" target="_blank">serene</a>
+      
+    </div>
+    <div class="sponsor">
+      Enjoying my work? Consider <a href="https://github.com/sponsors/agourlay" rel="noreferrer" target="_blank">sponsoring me</a> on GitHub.
+    </div>
+  </div>
+
+  <div class="right">
+    
+    <a id="rss-btn" href="https://agourlay.github.io/atom.xml" aria-label="RSS feed">RSS</a>
+    
+
+    
+    
+    
+    <button id="theme-toggle" aria-label="theme switch">
+      <span class="moon-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M10 7C10 10.866 13.134 14 17 14C18.9584 14 20.729 13.1957 21.9995 11.8995C22 11.933 22 11.9665 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C12.0335 2 12.067 2 12.1005 2.00049C10.8043 3.27098 10 5.04157 10 7ZM4 12C4 16.4183 7.58172 20 12 20C15.0583 20 17.7158 18.2839 19.062 15.7621C18.3945 15.9187 17.7035 16 17 16C12.0294 16 8 11.9706 8 7C8 6.29648 8.08133 5.60547 8.2379 4.938C5.71611 6.28423 4 8.9417 4 12Z" fill="currentColor"></path></svg>
+</span>
+      <span class="sun-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12 18C8.68629 18 6 15.3137 6 12C6 8.68629 8.68629 6 12 6C15.3137 6 18 8.68629 18 12C18 15.3137 15.3137 18 12 18ZM12 16C14.2091 16 16 14.2091 16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16ZM11 1H13V4H11V1ZM11 20H13V23H11V20ZM3.51472 4.92893L4.92893 3.51472L7.05025 5.63604L5.63604 7.05025L3.51472 4.92893ZM16.9497 18.364L18.364 16.9497L20.4853 19.0711L19.0711 20.4853L16.9497 18.364ZM19.0711 3.51472L20.4853 4.92893L18.364 7.05025L16.9497 5.63604L19.0711 3.51472ZM5.63604 16.9497L7.05025 18.364L4.92893 20.4853L3.51472 19.0711L5.63604 16.9497ZM23 11V13H20V11H23ZM4 11V13H1V11H4Z" fill="currentColor"></path></svg>
+</span>
+    </button>
+    
+  </div>
+</footer>
+
+  </main>
+</div>
+
+  
+<script src="/js/lightense.min.js"></script>
+
+
+  <script src="https://agourlay.github.io/js/main.js"></script>
+</body>
+
+</html>

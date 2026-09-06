@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  
+    
+  <meta name="description" content="First part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust.">
+<link rel="canonical" href="https://agourlay.github.io/rust-performance-retrospective-part1/">
+<meta property="og:site_name" content="Arnaud Gourlay&#x27;s blog">
+<meta property="og:type" content="article">
+<meta property="og:title" content="A performance retrospective using Rust (part 1)">
+<meta property="og:description" content="First part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust.">
+<meta property="og:url" content="https://agourlay.github.io/rust-performance-retrospective-part1/">
+<meta property="og:locale" content="en">
+
+
+<meta property="article:published_time" content="2022-07-11">
+
+<meta property="article:tag" content="Rust">
+<meta property="article:tag" content="performance">
+<meta property="article:tag" content="hprof-slurp">
+<meta property="article:tag" content="benchmarking">
+<meta property="article:tag" content="series">
+
+
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="A performance retrospective using Rust (part 1)">
+<meta name="twitter:description" content="First part of a retrospective regarding making a simple JVM heap analyzer faster over time with Rust.">
+
+
+
+  <title>A performance retrospective using Rust (part 1)</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="https://agourlay.github.io/img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://agourlay.github.io/img/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://agourlay.github.io/img/apple-touch-icon.png">
+  
+  <style>
+
+  /* light mode colors */
+  body {
+    --primary-color: #5871a2;
+    --primary-pale-color: #5871a233;
+    --primary-decoration-color: #5871a210;
+    --bg-color: #ffffff;
+    --text-color: #2f3030;
+    --text-pale-color: #767676;
+    --text-decoration-color: #a9a9a9;
+    --highlight-mark-color: #5f75b020;
+
+    --callout-note-color: #5871a2;
+    --callout-tip-color: #268556;
+    --callout-important-color: #885fc9;
+    --callout-warning-color: #ab6632;
+    --callout-caution-color: #c64e4e;
+  }
+
+  /* dark mode colors */
+  body.dark {
+    --primary-color: #6f8fd1;
+    --primary-pale-color: #6f8fd166;
+    --primary-decoration-color: #6f8fd112;
+    --bg-color: #1c1c1c;
+    --text-color: #c1c1c1;
+    --text-pale-color: #848484;
+    --text-decoration-color: #5f5f5f;
+    --highlight-mark-color: #8296cb3b;
+
+    --callout-note-color: #6f8fd1;
+    --callout-tip-color: #47976f;
+    --callout-important-color: #9776cd;
+    --callout-warning-color: #ad7a52;
+    --callout-caution-color: #d06161;
+  }
+
+  /* typography */
+  body {
+    --main-font: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --code-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    --homepage-max-width: 768px;
+    --main-max-width: 768px;
+    --avatar-size: 60px;
+    --font-size: 16px;
+    --line-height: 1.75;
+    --img-border-radius: 0px;
+    --detail-border-radius: 0px;
+    --dark-mode-img-brightness: 0.75;
+    --dark-mode-chart-brightness: 0.75;
+    --inline-code-border-radius: 2px;
+    --inline-code-bg-color: var(--primary-decoration-color);
+    --block-code-border-radius: 0px;
+    --block-code-border-color: var(--primary-color);
+    --detail-border-color: var(--primary-color);
+  }
+
+</style>
+
+  <link rel="stylesheet" href="https://agourlay.github.io/main.css">
+  
+
+<link id="hl" rel="stylesheet" type="text/css" href="/giallo-light.css" />
+
+
+
+  <style>
+  /* Avatar: crop to fill the circle instead of distorting a non-square image */
+  #info img { object-fit: cover; object-position: center 22%; }
+  /* Footer: stack the copyright and sponsor lines instead of running them together
+     (Serene's `footer .left` is a flex row, meant for a single line) */
+  footer .left { flex-direction: column; align-items: flex-start; gap: 3px; }
+  /* Float the footer controls (RSS + theme toggle) to a fixed top-right cluster so
+     they're visible on landing without scrolling. Same elements, so main.js still works. */
+  footer .right {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    z-index: 50;
+    margin: 0;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 10px;
+    background: rgba(128, 128, 128, 0.12);
+  }
+  footer .right:hover { background: rgba(128, 128, 128, 0.20); }
+  footer .right #theme-toggle { transform: none; }
+</style>
+
+</head>
+
+<body class="post">
+  
+  <script>
+    const theme = sessionStorage.getItem('theme');
+    const match = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if ((theme && theme == 'dark') || (!theme && match)) {
+      document.body.classList.add('dark');
+      const hl = document.querySelector('link#hl');
+      if (hl) hl.href = 'https://agourlay.github.io/giallo-dark.css';
+    }
+  </script>
+  
+  
+<div id="wrapper">
+  <div id="blank"></div>
+  <aside>
+    
+    
+    <nav>
+      <ul>
+        
+        <li>
+          <a class="h2" href="#context">Context</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#hprof-slurp">Hprof-slurp</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#architecture">Architecture</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#test-data">Test data</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#performance-over-time">Performance over time</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#future-work">Future work</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#conclusion">Conclusion</a>
+          
+        </li>
+        
+      </ul>
+    </nav>
+    
+    
+    <button id="back-to-top" aria-label="back to top">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-arrow-up"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+
+    </button>
+    
+  </aside>
+  <main>
+    
+<header>
+  <nav>
+    <a id="back-link" href="https:&#x2F;&#x2F;agourlay.github.io&#x2F;posts">← Back</a>
+  </nav>
+</header>
+
+
+    <div>
+      
+      
+      
+      
+      <div id="copy-cfg" style="display: none;" data-copy-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M6.9998 6V3C6.9998 2.44772 7.44752 2 7.9998 2H19.9998C20.5521 2 20.9998 2.44772 20.9998 3V17C20.9998 17.5523 20.5521 18 19.9998 18H16.9998V20.9991C16.9998 21.5519 16.5499 22 15.993 22H4.00666C3.45059 22 3 21.5554 3 20.9991L3.0026 7.00087C3.0027 6.44811 3.45264 6 4.00942 6H6.9998ZM5.00242 8L5.00019 20H14.9998V8H5.00242ZM8.9998 6H16.9998V16H18.9998V4H8.9998V6Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+" data-check-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M10.0007 15.1709L19.1931 5.97852L20.6073 7.39273L10.0007 17.9993L3.63672 11.6354L5.05093 10.2212L10.0007 15.1709Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+"></div>
+      
+      <article class="prose">
+        <h1>A performance retrospective using Rust (part 1)</h1>
+        <div id="post-info">
+          <div id="date">
+            <span id="publish">11 July 2022</span>
+            </div>
+
+          
+          <div id="tags">
+            <a class="instant" href="https://agourlay.github.io/tags/rust"><span>#</span>Rust</a><a class="instant" href="https://agourlay.github.io/tags/performance"><span>#</span>performance</a><a class="instant" href="https://agourlay.github.io/tags/hprof-slurp"><span>#</span>hprof-slurp</a><a class="instant" href="https://agourlay.github.io/tags/benchmarking"><span>#</span>benchmarking</a><a class="instant" href="https://agourlay.github.io/tags/series"><span>#</span>series</a>
+          </div>
+          
+        </div>
+
+        
+        
+
+        
+
+        <p>This is the first article in a series regarding making a simple JVM heap dump analyzer in Rust faster over time.</p>
+<p>Although it is primarily targeted at intermediate Rust developers, it will surely be relevant for engineers interested in performance in general.</p>
+<p>Performance optimization is highly context-dependent so it makes sense to spend some time explaining what problem we are trying to solve.</p>
+<h2 id="context">Context<a class="zola-anchor" href="#context" aria-label="Anchor link for: context" style="visibility: hidden;"></a>
+</h2>
+<p>In a previous life, I found myself needing to analyze large JVM heap dumps. For a sense of scale, "large" stands for more than 50Gb in that context.</p>
+<p>The JVM ecosystem is pretty rich in terms of tooling regarding heap dump analysis. Most JVM developers are familiar with <a rel="nofollow noreferrer external" href="https://visualvm.github.io/">VisualVM</a> and <a rel="nofollow noreferrer external" href="https://www.eclipse.org/mat/">EclipseMat</a>.</p>
+<p>Those tools are truly excellent; they offer a large panel of <a rel="nofollow noreferrer external" href="https://eclipsesource.com/blogs/2013/01/21/10-tips-for-using-the-eclipse-memory-analyzer/">features</a> to drill down on the content of heap dumps to help you pinpoint your issue very precisely.</p>
+<p>However, they tend to be extremely memory hungry and slow when analyzing large files, which is forcing users to spin up expensive beefy instances from a cloud provider to get the job done.</p>
+<p>The tool I needed was fairly specific, my main concern was to get a quick overview of large heap dumps using a regular developer machine to decide if it actually makes sense to investigate further using the aforementioned workflow.</p>
+<p>The goal is not to replace the existing tooling but to optimize the investigation workflow and this led me to create the <a rel="nofollow noreferrer external" href="https://github.com/agourlay/hprof-slurp">hprof-slurp</a> project.</p>
+<h2 id="hprof-slurp">Hprof-slurp<a class="zola-anchor" href="#hprof-slurp" aria-label="Anchor link for: hprof-slurp" style="visibility: hidden;"></a>
+</h2>
+<p>The project is a CLI written in Rust which processes dump files in a streaming fashion.</p>
+<p>It trades off features for speed by performing only a single pass without storing intermediary results on the host, which reduces the depth of the analysis possible.</p>
+<p>The project is named after the <a rel="nofollow noreferrer external" href="https://docs.oracle.com/javase/8/docs/technotes/samples/hprof.html">hprof</a> format which is used by the JDK to encode heap dumps.</p>
+<p>The 3 main features available are:</p>
+<ul>
+<li>report top <code>k</code> allocated classes.</li>
+<li>report the count of instances per class.</li>
+<li>report the largest instance size per class.</li>
+</ul>
+<p>Let's have a look at an example of output processing: a <a rel="nofollow noreferrer external" href="https://github.com/agourlay/hprof-slurp/tree/master/test-heap-dumps">tiny heap dump</a> which is used as part of the integration test pipeline.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">du</span><span class="z-constant"> -</span><span class="z-constant">BM</span><span class="z-string"> hprof-64.bin</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">2M</span><span class="z-string"> hprof-64.bin</span></span></code></pre>
+<p>Let's process that 2Mb heap dump!</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">./hprof-slurp</span><span class="z-constant"> -</span><span class="z-constant">i</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">hprof-64.bin</span><span class="z-punctuation z-definition z-string">&quot;</span></span></code></pre>
+<p>Which instantaneously yields those two tables</p>
+<pre class="giallo z-code"><code data-lang="plain"><span class="giallo-l"><span>Top 20 allocated classes:</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Total size | Instances |     Largest | Class name                                  </span></span>
+<span class="giallo-l"><span>------------------------------------------------------------------------------------</span></span>
+<span class="giallo-l"><span>   1.99MiB |       436 |   634.78KiB | int[]</span></span>
+<span class="giallo-l"><span> 197.11KiB |      1991 |    16.02KiB | char[]</span></span>
+<span class="giallo-l"><span>  85.25KiB |       443 |     8.02KiB | byte[]</span></span>
+<span class="giallo-l"><span>  47.38KiB |      1516 |  32.00bytes | java/lang/String</span></span>
+<span class="giallo-l"><span>  45.42KiB |       560 |     8.02KiB | java/lang/Object[]</span></span>
+<span class="giallo-l"><span>  15.26KiB |       126 | 124.00bytes | java/lang/reflect/Field</span></span>
+<span class="giallo-l"><span>  14.77KiB |       378 |  40.00bytes | java/util/LinkedList$Node</span></span>
+<span class="giallo-l"><span>   9.94KiB |       212 |  48.00bytes | java/util/HashMap$Node</span></span>
+<span class="giallo-l"><span>   8.91KiB |       190 |  48.00bytes | java/util/LinkedList</span></span>
+<span class="giallo-l"><span>   8.42KiB |        98 |  88.00bytes | java/lang/ref/SoftReference</span></span>
+<span class="giallo-l"><span>   6.05KiB |       258 |  24.00bytes | java/lang/Integer</span></span>
+<span class="giallo-l"><span>   5.91KiB |        18 |     2.02KiB | java/util/HashMap$Node[]</span></span>
+<span class="giallo-l"><span>   5.86KiB |       150 |  40.00bytes | java/lang/StringBuilder</span></span>
+<span class="giallo-l"><span>   5.44KiB |       116 |  48.00bytes | java/util/Hashtable$Entry</span></span>
+<span class="giallo-l"><span>   5.05KiB |        38 | 136.00bytes | sun/util/locale/LocaleObjectCache$CacheEntry</span></span>
+<span class="giallo-l"><span>   5.00KiB |        40 | 128.00bytes | java/lang/ref/Finalizer</span></span>
+<span class="giallo-l"><span>   3.50KiB |        32 | 112.00bytes | java/net/URL</span></span>
+<span class="giallo-l"><span>   3.42KiB |        73 |  48.00bytes | java/io/File</span></span>
+<span class="giallo-l"><span>   3.17KiB |        12 | 776.00bytes | java/util/Hashtable$Entry[]</span></span>
+<span class="giallo-l"><span>   3.13KiB |        56 | 144.00bytes | java/lang/String[]</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Top 20 largest instances:</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span> Total size | Instances |     Largest | Class name                                   </span></span>
+<span class="giallo-l"><span>--------------------------------------------------------------------------------------</span></span>
+<span class="giallo-l"><span>    1.99MiB |       436 |   634.78KiB | int[]</span></span>
+<span class="giallo-l"><span>  197.11KiB |      1991 |    16.02KiB | char[]</span></span>
+<span class="giallo-l"><span>   85.25KiB |       443 |     8.02KiB | byte[]</span></span>
+<span class="giallo-l"><span>   45.42KiB |       560 |     8.02KiB | java/lang/Object[]</span></span>
+<span class="giallo-l"><span>    5.91KiB |        18 |     2.02KiB | java/util/HashMap$Node[]</span></span>
+<span class="giallo-l"><span>    2.05KiB |         2 |     2.02KiB | java/lang/invoke/MethodHandle[]</span></span>
+<span class="giallo-l"><span>    2.02KiB |         1 |     2.02KiB | java/lang/Integer[]</span></span>
+<span class="giallo-l"><span>    3.17KiB |        12 | 776.00bytes | java/util/Hashtable$Entry[]</span></span>
+<span class="giallo-l"><span>462.00bytes |         1 | 462.00bytes | sun/misc/Launcher$AppClassLoader</span></span>
+<span class="giallo-l"><span>454.00bytes |         1 | 454.00bytes | sun/misc/Launcher$ExtClassLoader</span></span>
+<span class="giallo-l"><span>680.00bytes |         2 | 340.00bytes | simple/Producer</span></span>
+<span class="giallo-l"><span>680.00bytes |         2 | 340.00bytes | simple/Consumer</span></span>
+<span class="giallo-l"><span>    2.30KiB |         7 | 336.00bytes | java/util/jar/JarFile$JarFileEntry</span></span>
+<span class="giallo-l"><span>334.00bytes |         1 | 334.00bytes | java/lang/ref/Finalizer$FinalizerThread</span></span>
+<span class="giallo-l"><span>332.00bytes |         1 | 332.00bytes | java/lang/ref/Reference$ReferenceHandler</span></span>
+<span class="giallo-l"><span>    1.01KiB |         9 | 312.00bytes | java/lang/reflect/Field[]</span></span>
+<span class="giallo-l"><span>    1.48KiB |         7 | 272.00bytes | java/util/concurrent/ConcurrentHashMap$Node[]</span></span>
+<span class="giallo-l"><span>236.00bytes |         1 | 236.00bytes | sun/net/www/protocol/file/FileURLConnection</span></span>
+<span class="giallo-l"><span>440.00bytes |         2 | 220.00bytes | java/io/ExpiringCache$1</span></span>
+<span class="giallo-l"><span>432.00bytes |         2 | 216.00bytes | java/lang/NoSuchMethodError</span></span></code></pre>
+<p>And that's all there is to it.</p>
+<h2 id="architecture">Architecture<a class="zola-anchor" href="#architecture" aria-label="Anchor link for: architecture" style="visibility: hidden;"></a>
+</h2>
+<p>As mentioned previously, the CLI is written in Rust and works in a synchronous multithreaded fashion.</p>
+<p>Here is a simplified architecture diagram for the current version (0.4.7).</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-07-11&#x2F;architecture.png"
+         alt="Architecture"
+        
+        
+    >
+    
+</figure>
+<p>The various threads are wired up together via channels to form a processing pipeline where all stages run in parallel (if the host has enough cores).</p>
+<p>The file reader thread proactively loads chunks of 64Mb from the input file to not starve the rest of the pipeline while waiting for IO. Loading too many chunks in advance has a direct impact on the memory usage, so I settled on 3 chunks based on experiments.</p>
+<p>Those chunks are then sent over to the streaming parser which was the most challenging work of the project because it must handle incomplete inputs.
+A single chunk can contain millions of records, and a chunk is of course not aligned on the actual boundary of the <code>hprof</code> records.</p>
+<p>Therefore, the parser tries to make sense of the incoming binary data while carefully managing its inner buffer.</p>
+<p>More concretely, it has been written by following the <a rel="nofollow noreferrer external" href="https://hg.openjdk.java.net/jdk/jdk/file/ee1d592a9f53/src/hotspot/share/services/heapDumper.cpp#l62">full specification of the hprof format</a> found in the heap dumper code of the JDK.</p>
+<p>The parser itself is written with the <a rel="nofollow noreferrer external" href="https://github.com/Geal/nom">nom</a> library, which I found a real pleasure to work with due to its support for parsing incomplete data.</p>
+<p>As the content of the file is streamed through the parser, the class information is extracted and forwarded to the statistics recorder thread which keeps track of the instance counts in order to later compute the heavy hitters.</p>
+<p>Spoiler alert: as of version 0.4.7, the performance bottleneck is the parsing thread.</p>
+<p>Speeding up other stages of the pipeline would not yield any performance improvements.</p>
+<h2 id="test-data">Test data<a class="zola-anchor" href="#test-data" aria-label="Anchor link for: test-data" style="visibility: hidden;"></a>
+</h2>
+<p>We are about to do some performance testing, which means we need some meaningful test data.</p>
+<p>For the sake of transparency or reproducibility, I will show you exactly how to generate a similar heap dump.</p>
+<p>To avoid completely synthetic data, we will be using <a rel="nofollow noreferrer external" href="https://github.com/spring-petclinic/spring-petclinic-rest">Spring's REST petclinic</a>.</p>
+<p>It is a reasonable choice because it is relatively well known, and it uses an in-memory database by default which naturally amplifies the memory usage.</p>
+<p>In order to not waste too much time growing the heap, we will simply use the Java <a rel="nofollow noreferrer external" href="https://blogs.oracle.com/javamagazine/post/epsilon-the-jdks-do-nothing-garbage-collector">Epsilon GC</a> which does not clean up anything.</p>
+<p>This is the change to apply if you want to try this at home.</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span>git diff</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-header">diff --git a/pom.xml b/pom.xml</span></span>
+<span class="giallo-l"><span>index b936a37..7621eb9 100644</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-header z-from-file">---</span><span class="z-meta z-diff z-header z-from-file"> a/pom.xml</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-header z-to-file">+++</span><span class="z-meta z-diff z-header z-to-file"> b/pom.xml</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -165,6 +165,15</span><span class="z-meta z-diff z-range"> @@</span></span>
+<span class="giallo-l"><span>             &lt;plugin&gt;</span></span>
+<span class="giallo-l"><span>                 &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;</span></span>
+<span class="giallo-l"><span>                 &lt;artifactId&gt;spring-boot-maven-plugin&lt;/artifactId&gt;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                &lt;configuration&gt;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    &lt;executable&gt;true&lt;/executable&gt;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    &lt;jvmArguments&gt;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        -Xmx32g</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        -XX:+UnlockExperimentalVMOptions</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        -XX:+UseEpsilonGC</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    &lt;/jvmArguments&gt;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                &lt;/configuration&gt;</span></span>
+<span class="giallo-l"><span>                 &lt;executions&gt;</span></span>
+<span class="giallo-l"><span>                     &lt;execution&gt;</span></span>
+<span class="giallo-l"></span></code></pre>
+<p>You could also add <code>-XX:+HeapDumpOnOutOfMemoryError</code> if you prefer to produce a heap dump whenever an <code>OutOfMemoryError</code> is thrown instead of performing the dump manually.</p>
+<p>In any case we can start the application using Maven.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">./mvnw</span><span class="z-string"> spring-boot:run</span></span></code></pre>
+<p>In order to increase the memory pressure, we will gently hammer one of the REST endpoints using <a rel="nofollow noreferrer external" href="https://github.com/rakyll/hey">Hey</a>.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">hey</span><span class="z-constant"> -</span><span class="z-constant">m</span><span class="z-string"> POST</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">D</span><span class="z-string"> ./payload-owner.json</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">T</span><span class="z-string"> application/json</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">A</span><span class="z-string"> application/json</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">z</span><span class="z-string"> 3m</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">c</span><span class="z-constant"> 50</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-string"> http://127.0.0.1:9966/petclinic/api/owners</span></span></code></pre>
+<p>With the following <code>payload-owner.json</code></p>
+<pre class="giallo z-code"><code data-lang="json"><span class="giallo-l"><span>{</span></span>
+<span class="giallo-l"><span class="z-support">  &quot;</span><span class="z-support">address</span><span class="z-support">&quot;</span><span>:</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">110 W. Liberty St.</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-support">  &quot;</span><span class="z-support">city</span><span class="z-support">&quot;</span><span>:</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">Madison</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-support">  &quot;</span><span class="z-support">firstName</span><span class="z-support">&quot;</span><span>:</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">George</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-support">  &quot;</span><span class="z-support">lastName</span><span class="z-support">&quot;</span><span>:</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">Franklin</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span class="z-support">  &quot;</span><span class="z-support">telephone</span><span class="z-support">&quot;</span><span>:</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">6085551023</span><span class="z-punctuation z-definition z-string">&quot;</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>Once the desired heap size is reached, we can generate a heap dump with <code>jmap</code>.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">jmap</span><span class="z-constant"> -</span><span class="z-constant">dump:format=b,file=pets.bin</span><span class="z-keyword"> &lt;</span><span class="z-string">pi</span><span>d</span><span class="z-keyword">&gt;</span></span></code></pre>
+<p>Which gives us a decent 34Gb heap dump file to play with.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">du</span><span class="z-constant"> -</span><span class="z-constant">BM</span><span class="z-string"> pets.bin</span></span>
+<span class="giallo-l"><span class="z-entity z-name">34486M</span><span class="z-string"> pets.bin</span></span></code></pre>
+<p>Let's see what <code>hprof-slurp</code> has to say about it.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">./hprof-slurp</span><span class="z-constant"> -</span><span class="z-constant">i</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span></span></code></pre><pre class="giallo z-code"><code data-lang="plain"><span class="giallo-l"><span>Top 20 allocated classes:</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Total size | Instances |     Largest | Class name                                                                                 </span></span>
+<span class="giallo-l"><span>-----------------------------------------------------------------------------------------------------------------------------------</span></span>
+<span class="giallo-l"><span>   4.02GiB |  90184199 |   544.20KiB | byte[]</span></span>
+<span class="giallo-l"><span>   2.13GiB |  55748013 |   109.80KiB | java/lang/Object[]</span></span>
+<span class="giallo-l"><span>   1.72GiB |  51264762 |  36.00bytes | java/lang/String</span></span>
+<span class="giallo-l"><span>   1.57GiB |  14807226 | 114.00bytes | org/hibernate/validator/internal/engine/path/NodeImpl</span></span>
+<span class="giallo-l"><span>   1.18GiB |   8536353 | 148.00bytes | java/nio/HeapByteBuffer</span></span>
+<span class="giallo-l"><span>   1.03GiB |  18074217 |     3.75MiB | int[]</span></span>
+<span class="giallo-l"><span>1022.73MiB |   5765654 | 186.00bytes | java/lang/reflect/Method</span></span>
+<span class="giallo-l"><span>1021.18MiB |  26769597 |  40.00bytes | java/util/ArrayList</span></span>
+<span class="giallo-l"><span> 896.73MiB |  21370207 |  44.00bytes | java/lang/StringBuilder</span></span>
+<span class="giallo-l"><span> 838.65MiB |   7594346 |    16.02KiB | java/util/HashMap$Node[]</span></span>
+<span class="giallo-l"><span> 744.79MiB |   5276798 | 148.00bytes | java/nio/StringCharBuffer</span></span>
+<span class="giallo-l"><span> 743.57MiB |   5340350 | 146.00bytes | java/util/LinkedHashMap</span></span>
+<span class="giallo-l"><span> 631.70MiB |   6899814 |  96.00bytes | java/util/regex/Matcher</span></span>
+<span class="giallo-l"><span> 606.64MiB |   6490868 |  98.00bytes | org/hibernate/validator/internal/engine/constraintvalidation/ConstraintValidatorContextImpl</span></span>
+<span class="giallo-l"><span> 605.70MiB |    610435 |   128.02KiB | java/util/concurrent/ConcurrentHashMap$Node[]</span></span>
+<span class="giallo-l"><span> 584.97MiB |  14604425 |  42.00bytes | org/hibernate/validator/internal/engine/path/PathImpl</span></span>
+<span class="giallo-l"><span> 556.55MiB |  14589693 |  40.00bytes | java/util/ArrayList$Itr</span></span>
+<span class="giallo-l"><span> 520.24MiB |   6818920 |  80.00bytes | java/util/HashMap</span></span>
+<span class="giallo-l"><span> 425.14MiB |   8330358 |    32.02KiB | char[]</span></span>
+<span class="giallo-l"><span> 424.89MiB |   9281863 |  48.00bytes | java/util/HashMap$Node</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Top 20 largest instances:</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>Total size | Instances |   Largest | Class name                                                        </span></span>
+<span class="giallo-l"><span>--------------------------------------------------------------------------------------------------------</span></span>
+<span class="giallo-l"><span>   1.03GiB |  18074217 |   3.75MiB | int[]</span></span>
+<span class="giallo-l"><span>   4.02GiB |  90184199 | 544.20KiB | byte[]</span></span>
+<span class="giallo-l"><span> 605.70MiB |    610435 | 128.02KiB | java/util/concurrent/ConcurrentHashMap$Node[]</span></span>
+<span class="giallo-l"><span>   2.13GiB |  55748013 | 109.80KiB | java/lang/Object[]</span></span>
+<span class="giallo-l"><span> 425.14MiB |   8330358 |  32.02KiB | char[]</span></span>
+<span class="giallo-l"><span>  13.70MiB |    211087 |  24.02KiB | long[]</span></span>
+<span class="giallo-l"><span>   5.81MiB |      3456 |  16.07KiB | jdk/internal/org/objectweb/asm/SymbolTable$Entry[]</span></span>
+<span class="giallo-l"><span> 314.02KiB |       159 |  16.07KiB | org/springframework/asm/SymbolTable$Entry[]</span></span>
+<span class="giallo-l"><span> 838.65MiB |   7594346 |  16.02KiB | java/util/HashMap$Node[]</span></span>
+<span class="giallo-l"><span>  81.18MiB |   2093066 |   9.05KiB | java/lang/String[]</span></span>
+<span class="giallo-l"><span> 432.84KiB |        54 |   8.02KiB | java/nio/ByteBuffer[]</span></span>
+<span class="giallo-l"><span>  15.83KiB |         2 |   7.91KiB | java/util/Locale[]</span></span>
+<span class="giallo-l"><span>  13.94MiB |    405627 |   4.67KiB | java/lang/Object[]</span></span>
+<span class="giallo-l"><span>  30.21KiB |        12 |   4.02KiB | net/bytebuddy/jar/asm/SymbolTable$Entry[]</span></span>
+<span class="giallo-l"><span>  47.46MiB |    214730 |   3.01KiB | java/lang/reflect/Method[]</span></span>
+<span class="giallo-l"><span>   4.23KiB |         6 |   2.97KiB | [[B[]</span></span>
+<span class="giallo-l"><span>   2.84KiB |         1 |   2.84KiB | java/lang/Character$UnicodeBlock[]</span></span>
+<span class="giallo-l"><span>   2.67KiB |         1 |   2.67KiB | jdk/internal/math/FDBigInteger[]</span></span>
+<span class="giallo-l"><span>   4.28KiB |         2 |   2.14KiB | sun/security/util/KnownOIDs[]</span></span>
+<span class="giallo-l"><span>   2.11KiB |         1 |   2.11KiB | org/springframework/boot/web/embedded/tomcat/TomcatEmbeddedContext</span></span></code></pre>
+<p>This output looks about right for an application using an in-memory database. We find the usual suspects regarding various arrays, HashMap nodes and Strings.</p>
+<h2 id="performance-over-time">Performance over time<a class="zola-anchor" href="#performance-over-time" aria-label="Anchor link for: performance-over-time" style="visibility: hidden;"></a>
+</h2>
+<p>It is often interesting to track the performance of a piece of software over time to be able to attribute gains to precise changes.</p>
+<p>Sometimes a single line change can have a tremendous effect, and sometimes a complete change of architecture is required to remove a bottleneck.</p>
+<p>Using the benchmarking tool <a rel="nofollow noreferrer external" href="https://github.com/sharkdp/hyperfine">hyperfine</a> we are able to measure accurately the execution time of our CLI in a blackbox fashion.</p>
+<p>For reference, I will be running the benchmarks on a laptop running Linux on an Intel <a rel="nofollow noreferrer external" href="https://www.intel.com/content/www/us/en/products/sku/201896/intel-core-i710610u-processor-8m-cache-up-to-4-90-ghz/specifications.html">i7-10610U</a> CPU.</p>
+<p>In this comparison analysis, we are interested in the relative speedup between releases and not the absolute durations, which are mostly a function of the dump size given a stable throughput.</p>
+<p>After downloading all the versions of <code>hprof-slurp</code> into the same directory, we can compare how they handle the <code>pets.bin</code> heap dump using the following <code>hyperfine</code> magic incantation.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">hyperfine</span><span class="z-constant"> -</span><span class="z-constant">-runs</span><span class="z-constant"> 3</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-markdown</span><span class="z-string"> hprof.md</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-json</span><span class="z-string"> hprof.json</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.1.0</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.1.0 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.2.0</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.2.0 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.2.1</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.2.1 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.2.2</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.2.2 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.3.0</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.3.0 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.3.1</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.3.1 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.3.2</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.3.2 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.3.3</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.3.3 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.4.0</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.4.0 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.4.1</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.4.1 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.4.2</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.4.2 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.4.3</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.4.3 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.4.4</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.4.4 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.4.5</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.4.5 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.4.6</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.4.6 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 0.4.7</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./hprof-slurp-0.4.7 -i pets.bin</span><span class="z-punctuation z-definition z-string">&quot;</span></span></code></pre>
+<p>Which - after a long time - yields the following Markdown table in <code>hprof.md</code>.</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>0.1.0</code></td><td style="text-align: right">131.227 ± 4.072</td><td style="text-align: right">126.660</td><td style="text-align: right">134.475</td><td style="text-align: right">3.83 ± 0.12</td></tr>
+<tr><td style="text-align: left"><code>0.2.0</code></td><td style="text-align: right">119.450 ± 0.244</td><td style="text-align: right">119.206</td><td style="text-align: right">119.694</td><td style="text-align: right">3.49 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>0.2.1</code></td><td style="text-align: right">119.038 ± 0.513</td><td style="text-align: right">118.452</td><td style="text-align: right">119.405</td><td style="text-align: right">3.47 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>0.2.2</code></td><td style="text-align: right">92.710 ± 0.893</td><td style="text-align: right">91.685</td><td style="text-align: right">93.324</td><td style="text-align: right">2.71 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>0.3.0</code></td><td style="text-align: right">84.097 ± 0.159</td><td style="text-align: right">83.953</td><td style="text-align: right">84.268</td><td style="text-align: right">2.45 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.3.1</code></td><td style="text-align: right">81.579 ± 0.073</td><td style="text-align: right">81.497</td><td style="text-align: right">81.639</td><td style="text-align: right">2.38 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.3.2</code></td><td style="text-align: right">81.255 ± 0.211</td><td style="text-align: right">81.028</td><td style="text-align: right">81.445</td><td style="text-align: right">2.37 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.3.3</code></td><td style="text-align: right">77.121 ± 0.228</td><td style="text-align: right">76.937</td><td style="text-align: right">77.376</td><td style="text-align: right">2.25 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.4.0</code></td><td style="text-align: right">67.911 ± 0.979</td><td style="text-align: right">66.826</td><td style="text-align: right">68.728</td><td style="text-align: right">1.98 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>0.4.1</code></td><td style="text-align: right">65.925 ± 0.344</td><td style="text-align: right">65.645</td><td style="text-align: right">66.309</td><td style="text-align: right">1.92 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.4.2</code></td><td style="text-align: right">65.779 ± 0.240</td><td style="text-align: right">65.602</td><td style="text-align: right">66.053</td><td style="text-align: right">1.92 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.4.3</code></td><td style="text-align: right">63.398 ± 0.104</td><td style="text-align: right">63.291</td><td style="text-align: right">63.499</td><td style="text-align: right">1.85 ± 0.02</td></tr>
+<tr><td style="text-align: left"><code>0.4.4</code></td><td style="text-align: right">35.473 ± 0.047</td><td style="text-align: right">35.444</td><td style="text-align: right">35.527</td><td style="text-align: right">1.04 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.4.5</code></td><td style="text-align: right">34.695 ± 0.302</td><td style="text-align: right">34.440</td><td style="text-align: right">35.028</td><td style="text-align: right">1.01 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.4.6</code></td><td style="text-align: right">34.285 ± 0.048</td><td style="text-align: right">34.254</td><td style="text-align: right">34.340</td><td style="text-align: right">1.00 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>0.4.7</code></td><td style="text-align: right">34.264 ± 0.289</td><td style="text-align: right">34.000</td><td style="text-align: right">34.574</td><td style="text-align: right">1.00</td></tr>
+</tbody></table>
+<p>And using the <code>hprof.json</code> file and some python <a rel="nofollow noreferrer external" href="https://github.com/sharkdp/hyperfine/tree/master/scripts">scripts</a> we generate the following whisker graph.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-07-11&#x2F;hprof-graph.png"
+         alt="Whisker graph"
+        
+        
+    >
+    
+</figure>
+<p>Some observations:</p>
+<ul>
+<li>the throughput increased by more than 70%</li>
+<li>0.1.0 has a large variance (might be a warmup issue)</li>
+<li>starting from 0.4.5 the iterative improvement is minimal</li>
+</ul>
+<p>In any case, we reached a solid 1Gb/s throughput in the latest version given the size of our test file.</p>
+<p>Let's have a look at the peak memory consumption for 0.4.7 using <a rel="nofollow noreferrer external" href="https://github.com/KDE/heaptrack">Heaptrack</a>.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">heaptrack</span><span class="z-string"> ./hprof-slurp-0.4.7</span><span class="z-constant"> -</span><span class="z-constant">i</span><span class="z-string"> pets.bin</span></span></code></pre>
+<p>This opens up the UI directly after the run if it is installed.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-07-11&#x2F;latest-heaptrack-consumed.png"
+         alt="Heaptrack memory consumed"
+        
+        
+    >
+    
+</figure>
+<p>The memory usage is pretty stable; it seems we have been able to stream the whole 34 Gb file within 500Mb.</p>
+<p>Most of it is actually due to the various internal buffers which are used to communicate between the threads.
+Those are pre-allocated and can grow to a certain size before being shrunk to release the memory.</p>
+<p>One could expect a stable similar memory usage for much larger dumps unless those contain large arrays of primitives or objects which need to be parsed.</p>
+<h2 id="future-work">Future work<a class="zola-anchor" href="#future-work" aria-label="Anchor link for: future-work" style="visibility: hidden;"></a>
+</h2>
+<p>Obviously, I am still interested in making <code>hprof-slurp</code> faster — hopefully not at the expense of code readability.</p>
+<p>Outside the performance concern, I believe the output could still be improved to be more useful.</p>
+<p>First, I would like to validate the precision of the statistics reported by comparing the output of <code>hprof-slurp</code> against the existing tools. My gut feeling is that the numbers are not too far off and serve as a pretty good proxy.</p>
+<p>Moreover, additional extractions could be performed as long as it happens in a single pass, such as rendering the complete thread stack traces at the moment of the heap dump.</p>
+<p>Feel free to <a href="/about/">reach out</a> if you have suggestions.</p>
+<h2 id="conclusion">Conclusion<a class="zola-anchor" href="#conclusion" aria-label="Anchor link for: conclusion" style="visibility: hidden;"></a>
+</h2>
+<p>This article has shown that <a rel="nofollow noreferrer external" href="https://github.com/agourlay/hprof-slurp">hprof-slurp</a> has gotten faster over time and that it is now processing heap dumps at around 1Gb/s.</p>
+<p>It fulfills the initial goal, which was to offer a quick overview of large heap dumps using a regular developer machine.</p>
+<p>The next articles in this <a href="/tags/series/">series</a> will go through a selection of the most interesting optimizations that had the largest impact on performance.</p>
+<p>In the meantime, you can try to reproduce those results or, even better, analyze larger real-world heap dumps!</p>
+
+      </article>
+
+      
+      
+
+      
+      
+    </div>
+
+    <footer>
+  <div class="left">
+    <div class="copyright">
+      © 2026 Arnaud Gourlay
+      
+      <span>|</span>
+      Built with <a href="https://www.getzola.org" rel="noreferrer" target="_blank">zola</a> and <a href="https://github.com/isunjn/serene" rel="noreferrer" target="_blank">serene</a>
+      
+    </div>
+    <div class="sponsor">
+      Enjoying my work? Consider <a href="https://github.com/sponsors/agourlay" rel="noreferrer" target="_blank">sponsoring me</a> on GitHub.
+    </div>
+  </div>
+
+  <div class="right">
+    
+    <a id="rss-btn" href="https://agourlay.github.io/atom.xml" aria-label="RSS feed">RSS</a>
+    
+
+    
+    
+    
+    <button id="theme-toggle" aria-label="theme switch">
+      <span class="moon-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M10 7C10 10.866 13.134 14 17 14C18.9584 14 20.729 13.1957 21.9995 11.8995C22 11.933 22 11.9665 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C12.0335 2 12.067 2 12.1005 2.00049C10.8043 3.27098 10 5.04157 10 7ZM4 12C4 16.4183 7.58172 20 12 20C15.0583 20 17.7158 18.2839 19.062 15.7621C18.3945 15.9187 17.7035 16 17 16C12.0294 16 8 11.9706 8 7C8 6.29648 8.08133 5.60547 8.2379 4.938C5.71611 6.28423 4 8.9417 4 12Z" fill="currentColor"></path></svg>
+</span>
+      <span class="sun-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12 18C8.68629 18 6 15.3137 6 12C6 8.68629 8.68629 6 12 6C15.3137 6 18 8.68629 18 12C18 15.3137 15.3137 18 12 18ZM12 16C14.2091 16 16 14.2091 16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16ZM11 1H13V4H11V1ZM11 20H13V23H11V20ZM3.51472 4.92893L4.92893 3.51472L7.05025 5.63604L5.63604 7.05025L3.51472 4.92893ZM16.9497 18.364L18.364 16.9497L20.4853 19.0711L19.0711 20.4853L16.9497 18.364ZM19.0711 3.51472L20.4853 4.92893L18.364 7.05025L16.9497 5.63604L19.0711 3.51472ZM5.63604 16.9497L7.05025 18.364L4.92893 20.4853L3.51472 19.0711L5.63604 16.9497ZM23 11V13H20V11H23ZM4 11V13H1V11H4Z" fill="currentColor"></path></svg>
+</span>
+    </button>
+    
+  </div>
+</footer>
+
+  </main>
+</div>
+
+  
+<script src="/js/lightense.min.js"></script>
+
+
+  <script src="https://agourlay.github.io/js/main.js"></script>
+</body>
+
+</html>

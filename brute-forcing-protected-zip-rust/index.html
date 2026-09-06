@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  
+    
+  <meta name="description" content="How to brute force the password of protected ZIP archives using Rust">
+<link rel="canonical" href="https://agourlay.github.io/brute-forcing-protected-zip-rust/">
+<meta property="og:site_name" content="Arnaud Gourlay&#x27;s blog">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Brute forcing protected ZIP archives in Rust">
+<meta property="og:description" content="How to brute force the password of protected ZIP archives using Rust">
+<meta property="og:url" content="https://agourlay.github.io/brute-forcing-protected-zip-rust/">
+<meta property="og:locale" content="en">
+
+
+<meta property="article:published_time" content="2022-10-03">
+
+<meta property="article:tag" content="Rust">
+<meta property="article:tag" content="security">
+<meta property="article:tag" content="multithreading">
+<meta property="article:tag" content="benchmarking">
+
+
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Brute forcing protected ZIP archives in Rust">
+<meta name="twitter:description" content="How to brute force the password of protected ZIP archives using Rust">
+
+
+
+  <title>Brute forcing protected ZIP archives in Rust</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="https://agourlay.github.io/img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://agourlay.github.io/img/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://agourlay.github.io/img/apple-touch-icon.png">
+  
+  <style>
+
+  /* light mode colors */
+  body {
+    --primary-color: #5871a2;
+    --primary-pale-color: #5871a233;
+    --primary-decoration-color: #5871a210;
+    --bg-color: #ffffff;
+    --text-color: #2f3030;
+    --text-pale-color: #767676;
+    --text-decoration-color: #a9a9a9;
+    --highlight-mark-color: #5f75b020;
+
+    --callout-note-color: #5871a2;
+    --callout-tip-color: #268556;
+    --callout-important-color: #885fc9;
+    --callout-warning-color: #ab6632;
+    --callout-caution-color: #c64e4e;
+  }
+
+  /* dark mode colors */
+  body.dark {
+    --primary-color: #6f8fd1;
+    --primary-pale-color: #6f8fd166;
+    --primary-decoration-color: #6f8fd112;
+    --bg-color: #1c1c1c;
+    --text-color: #c1c1c1;
+    --text-pale-color: #848484;
+    --text-decoration-color: #5f5f5f;
+    --highlight-mark-color: #8296cb3b;
+
+    --callout-note-color: #6f8fd1;
+    --callout-tip-color: #47976f;
+    --callout-important-color: #9776cd;
+    --callout-warning-color: #ad7a52;
+    --callout-caution-color: #d06161;
+  }
+
+  /* typography */
+  body {
+    --main-font: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --code-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    --homepage-max-width: 768px;
+    --main-max-width: 768px;
+    --avatar-size: 60px;
+    --font-size: 16px;
+    --line-height: 1.75;
+    --img-border-radius: 0px;
+    --detail-border-radius: 0px;
+    --dark-mode-img-brightness: 0.75;
+    --dark-mode-chart-brightness: 0.75;
+    --inline-code-border-radius: 2px;
+    --inline-code-bg-color: var(--primary-decoration-color);
+    --block-code-border-radius: 0px;
+    --block-code-border-color: var(--primary-color);
+    --detail-border-color: var(--primary-color);
+  }
+
+</style>
+
+  <link rel="stylesheet" href="https://agourlay.github.io/main.css">
+  
+
+<link id="hl" rel="stylesheet" type="text/css" href="/giallo-light.css" />
+
+
+
+  <style>
+  /* Avatar: crop to fill the circle instead of distorting a non-square image */
+  #info img { object-fit: cover; object-position: center 22%; }
+  /* Footer: stack the copyright and sponsor lines instead of running them together
+     (Serene's `footer .left` is a flex row, meant for a single line) */
+  footer .left { flex-direction: column; align-items: flex-start; gap: 3px; }
+  /* Float the footer controls (RSS + theme toggle) to a fixed top-right cluster so
+     they're visible on landing without scrolling. Same elements, so main.js still works. */
+  footer .right {
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    z-index: 50;
+    margin: 0;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 10px;
+    background: rgba(128, 128, 128, 0.12);
+  }
+  footer .right:hover { background: rgba(128, 128, 128, 0.20); }
+  footer .right #theme-toggle { transform: none; }
+</style>
+
+</head>
+
+<body class="post">
+  
+  <script>
+    const theme = sessionStorage.getItem('theme');
+    const match = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if ((theme && theme == 'dark') || (!theme && match)) {
+      document.body.classList.add('dark');
+      const hl = document.querySelector('link#hl');
+      if (hl) hl.href = 'https://agourlay.github.io/giallo-dark.css';
+    }
+  </script>
+  
+  
+<div id="wrapper">
+  <div id="blank"></div>
+  <aside>
+    
+    
+    <nav>
+      <ul>
+        
+        <li>
+          <a class="h2" href="#context">Context</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#architecture">Architecture</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#dictionary">Dictionary</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#password-checker-worker">Password checker worker</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#putting-it-together">Putting it together</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#graceful-shutdown">Graceful shutdown</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#progress-bar">Progress bar</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#scaling-up">Scaling up</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#hyper-threading">Hyper-threading</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#going-faster">Going faster</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#password-generator">Password generator</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#future-work">Future work</a>
+          
+        </li>
+        
+        <li>
+          <a class="h2" href="#conclusion">Conclusion</a>
+          
+        </li>
+        
+      </ul>
+    </nav>
+    
+    
+    <button id="back-to-top" aria-label="back to top">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-arrow-up"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+
+    </button>
+    
+  </aside>
+  <main>
+    
+<header>
+  <nav>
+    <a id="back-link" href="https:&#x2F;&#x2F;agourlay.github.io&#x2F;posts">← Back</a>
+  </nav>
+</header>
+
+
+    <div>
+      
+      
+      
+      
+      <div id="copy-cfg" style="display: none;" data-copy-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M6.9998 6V3C6.9998 2.44772 7.44752 2 7.9998 2H19.9998C20.5521 2 20.9998 2.44772 20.9998 3V17C20.9998 17.5523 20.5521 18 19.9998 18H16.9998V20.9991C16.9998 21.5519 16.5499 22 15.993 22H4.00666C3.45059 22 3 21.5554 3 20.9991L3.0026 7.00087C3.0027 6.44811 3.45264 6 4.00942 6H6.9998ZM5.00242 8L5.00019 20H14.9998V8H5.00242ZM8.9998 6H16.9998V16H18.9998V4H8.9998V6Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+" data-check-icon="&lt;svg xmlns=&quot;http:&#x2F;&#x2F;www.w3.org&#x2F;2000&#x2F;svg&quot; viewBox=&quot;0 0 24 24&quot; width=&quot;18&quot; height=&quot;18&quot;&gt;&lt;path d=&quot;M10.0007 15.1709L19.1931 5.97852L20.6073 7.39273L10.0007 17.9993L3.63672 11.6354L5.05093 10.2212L10.0007 15.1709Z&quot; fill=&quot;currentColor&quot;&gt;&lt;&#x2F;path&gt;&lt;&#x2F;svg&gt;
+"></div>
+      
+      <article class="prose">
+        <h1>Brute forcing protected ZIP archives in Rust</h1>
+        <div id="post-info">
+          <div id="date">
+            <span id="publish"> 3 October 2022</span>
+            </div>
+
+          
+          <div id="tags">
+            <a class="instant" href="https://agourlay.github.io/tags/rust"><span>#</span>Rust</a><a class="instant" href="https://agourlay.github.io/tags/security"><span>#</span>security</a><a class="instant" href="https://agourlay.github.io/tags/multithreading"><span>#</span>multithreading</a><a class="instant" href="https://agourlay.github.io/tags/benchmarking"><span>#</span>benchmarking</a>
+          </div>
+          
+        </div>
+
+        
+        
+
+        
+
+        <p>This article explains how to brute force the password of protected ZIP archives using Rust. It is primarily targeted at beginner Rust developers, but it will surely be interesting to a wider audience.</p>
+<p>The full code with better error handling and proper command line arguments (CLI) is available at <a rel="nofollow noreferrer external" href="https://github.com/agourlay/zip-password-finder">zip-password-finder</a>.</p>
+<h2 id="context">Context<a class="zola-anchor" href="#context" aria-label="Anchor link for: context" style="visibility: hidden;"></a>
+</h2>
+<p>A while back, I found myself in possession of a ZIP archive containing family data that I could not access.
+The archive was protected by a password which no one knew.</p>
+<p>After a short investigation, I found several tools advertised as being capable of recovering passwords for various types of compressed archives.
+However, most of them looked rather fishy or required a license, which made me rather skeptical.</p>
+<p>It is at that point that I reached the conclusion that building such a tool myself would be a good learning opportunity.</p>
+<p>I might be able to recover the data and it could be the subject of a blog article!</p>
+<h2 id="architecture">Architecture<a class="zola-anchor" href="#architecture" aria-label="Anchor link for: architecture" style="visibility: hidden;"></a>
+</h2>
+<p>We can picture our future program as having two main parts.</p>
+<p>The first part is about generating candidate passwords. This could be done by either loading passwords from a dictionary or by simply generating all possible words ourselves.</p>
+<p>The second part is then responsible for testing those candidates against the archive, one by one until the password is found or no more candidates are available.</p>
+<p>Testing millions of passwords using a brute force strategy sounds like something that is CPU bound. Therefore, we should structure our program so that the second part can scale nicely with the number of cores on the host machine.</p>
+<p>A common approach for this type of problem is to use a set of workers to process tasks from a shared queue.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;architecture.png"
+         alt="Architecture"
+        
+        
+    >
+    
+</figure>
+<p>In practice, we will orchestrate the password generator and workers as threads communicating via a channel.</p>
+<p>Channels are a type of unidirectional asynchronous communication between threads that allows information to flow between the <code>Sender</code> and the <code>Receiver</code>.</p>
+<p>There are several flavors of channels. In our case, we need to support a single producer and multiple consumers, a.k.a. SPMC (but MPMC will do as well).</p>
+<h2 id="dictionary">Dictionary<a class="zola-anchor" href="#dictionary" aria-label="Anchor link for: dictionary" style="visibility: hidden;"></a>
+</h2>
+<p>In order to keep the scope small for the beginning, we will start by retrieving passwords from an existing dictionary file.</p>
+<p>The following file <a rel="nofollow noreferrer external" href="https://github.com/danielmiessler/SecLists/blob/master/Passwords/xato-net-10-million-passwords.txt">Passwords/xato-net-10-million-passwords.txt</a> found on GitHub looks like a perfect candidate.</p>
+<p>Let's fetch it and have a peek at its content:</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">wget</span><span class="z-string"> https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/xato-net-10-million-passwords.txt</span></span></code></pre><pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">ls</span><span class="z-constant"> -</span><span class="z-constant">lah</span><span class="z-string"> xato-net-10-million-passwords.txt</span><span class="z-keyword"> |</span><span class="z-entity z-name"> awk</span><span class="z-constant"> -</span><span class="z-constant">F</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string"> {</span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">print $5</span><span class="z-punctuation z-definition z-string">&#39;</span><span class="z-string">}</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">47M</span></span></code></pre><pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">wc</span><span class="z-constant"> -</span><span class="z-constant">l</span><span class="z-string"> xato-net-10-million-passwords.txt</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">5189454</span><span class="z-string"> xato-net-10-million-passwords.txt</span></span></code></pre><pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">head</span><span class="z-constant"> -</span><span class="z-constant">10</span><span class="z-string"> xato-net-10-million-passwords.txt</span><span> </span></span>
+<span class="giallo-l"><span class="z-entity z-name">123456</span></span>
+<span class="giallo-l"><span class="z-entity z-name">password</span></span>
+<span class="giallo-l"><span class="z-entity z-name">12345678</span></span>
+<span class="giallo-l"><span class="z-entity z-name">qwerty</span></span>
+<span class="giallo-l"><span class="z-entity z-name">123456789</span></span>
+<span class="giallo-l"><span class="z-entity z-name">12345</span></span>
+<span class="giallo-l"><span class="z-entity z-name">1234</span></span>
+<span class="giallo-l"><span class="z-entity z-name">111111</span></span>
+<span class="giallo-l"><span class="z-entity z-name">1234567</span></span>
+<span class="giallo-l"><span class="z-entity z-name">dragon</span></span></code></pre>
+<p>It actually contains only 5.189.454 passwords but that should be more than enough for our testing use case. We can start getting our hands dirty.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">cargo</span><span class="z-string"> new</span><span class="z-string"> zip-password-finder</span></span></code></pre>
+<p>Our program will have a thread reading the content of the password dictionary and pushing each line into a shared channel with the workers.</p>
+<p>There will be millions of password candidates. We need something very fast.</p>
+<p>We will use the <a rel="nofollow noreferrer external" href="https://github.com/crossbeam-rs/crossbeam">crossbeam-channel</a> crate for our channels because they are far superior to the channels available in <code>std::sync::mpsc</code> in every way.</p>
+<p>Those better channels might even make it to the standard library in the <a rel="nofollow noreferrer external" href="https://github.com/rust-lang/rust/pull/93563">future</a>.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-support">cd</span><span class="z-string"> zip-password-finder/</span></span>
+<span class="giallo-l"><span class="z-entity z-name">cargo</span><span class="z-string"> add</span><span class="z-string"> crossbeam-channel</span></span></code></pre>
+<p>Here is our reader:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> crossbeam_channel</span><span class="z-keyword">::</span><span class="z-entity z-name">Sender</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span class="z-entity z-name">fs</span><span class="z-keyword">::</span><span class="z-entity z-name">File</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span class="z-entity z-name">io</span><span class="z-keyword">::</span><span>{</span><span class="z-entity z-name">BufRead</span><span>,</span><span class="z-entity z-name"> BufReader</span><span>}</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span class="z-entity z-name">path</span><span class="z-keyword">::</span><span class="z-entity z-name">PathBuf</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span>thread</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span class="z-entity z-name">thread</span><span class="z-keyword">::</span><span class="z-entity z-name">JoinHandle</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-keyword">pub</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> start_password_reader</span><span>(</span><span class="z-variable z-other">file_path</span><span class="z-keyword">:</span><span class="z-entity z-name"> PathBuf</span><span>,</span><span class="z-variable z-other"> send_password</span><span class="z-keyword">:</span><span class="z-entity z-name"> Sender</span><span>&lt;</span><span class="z-entity z-name">String</span><span>&gt;</span><span>)</span><span class="z-keyword"> -&gt;</span><span class="z-entity z-name"> JoinHandle</span><span>&lt;</span><span>(</span><span>)</span><span>&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    thread</span><span class="z-keyword">::</span><span class="z-entity z-name">Builder</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">name</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">password-reader</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-keyword">.</span><span class="z-entity z-name">to_string</span><span>(</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">spawn</span><span>(</span><span class="z-keyword">move</span><span class="z-keyword"> |</span><span class="z-keyword">|</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">            let</span><span class="z-variable z-other"> file</span><span class="z-keyword"> =</span><span class="z-entity z-name"> File</span><span class="z-keyword">::</span><span class="z-entity z-name">open</span><span>(</span><span class="z-variable z-other">file_path</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">            let</span><span class="z-variable z-other"> reader</span><span class="z-keyword"> =</span><span class="z-entity z-name"> BufReader</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">file</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">            for</span><span class="z-variable z-other"> line</span><span class="z-keyword"> in</span><span class="z-variable z-other"> reader</span><span class="z-keyword">.</span><span class="z-entity z-name">lines</span><span>(</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">                match</span><span class="z-variable z-other"> send_password</span><span class="z-keyword">.</span><span class="z-entity z-name">send</span><span>(</span><span class="z-variable z-other">line</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                    Ok</span><span>(</span><span class="z-variable z-other">_</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span><span>}</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                    Err</span><span>(</span><span class="z-variable z-other">_</span><span>)</span><span class="z-keyword"> =&gt;</span><span class="z-keyword"> break</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span>                }</span></span>
+<span class="giallo-l"><span>            }</span></span>
+<span class="giallo-l"><span>        }</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>There are a few interesting things to note here:</p>
+<ul>
+<li>It is a good practice to give names to threads for better error reporting and performance observability.</li>
+<li>The function returns a <code>JoinHandle</code> for the caller, our main thread, to wait on.</li>
+<li>The entire file is read and pushed into the channel. This might be a problem for larger files.</li>
+</ul>
+<h2 id="password-checker-worker">Password checker worker<a class="zola-anchor" href="#password-checker-worker" aria-label="Anchor link for: password-checker-worker" style="visibility: hidden;"></a>
+</h2>
+<p>We will be using the <a rel="nofollow noreferrer external" href="https://github.com/zip-rs/zip">zip-rs</a> crate for testing the password candidates pulled from the channel.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">cargo</span><span class="z-string"> add</span><span class="z-string"> zip</span></span></code></pre>
+<p>It supports both <a rel="nofollow noreferrer external" href="https://github.com/zip-rs/zip/pull/115">ZipCrypto</a> and <a rel="nofollow noreferrer external" href="https://github.com/zip-rs/zip/pull/203">AES</a> encrypted zip archives.</p>
+<p>This is the first version of the worker thread:</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> crossbeam_channel</span><span class="z-keyword">::</span><span class="z-entity z-name">Sender</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span class="z-entity z-name">fs</span><span class="z-keyword">::</span><span class="z-entity z-name">File</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span class="z-entity z-name">io</span><span class="z-keyword">::</span><span>{</span><span class="z-entity z-name">BufRead</span><span>,</span><span class="z-entity z-name"> BufReader</span><span>}</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span class="z-entity z-name">path</span><span class="z-keyword">::</span><span class="z-entity z-name">PathBuf</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span>thread</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">use</span><span class="z-entity z-name"> std</span><span class="z-keyword">::</span><span class="z-entity z-name">thread</span><span class="z-keyword">::</span><span class="z-entity z-name">JoinHandle</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-keyword">pub</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> password_checker</span><span>(</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    index</span><span class="z-keyword">:</span><span class="z-entity z-name"> usize</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    file_path</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span class="z-entity z-name">Path</span><span>,</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    receive_password</span><span class="z-keyword">:</span><span class="z-entity z-name"> Receiver</span><span>&lt;</span><span class="z-entity z-name">String</span><span>&gt;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span class="z-keyword"> -&gt;</span><span class="z-entity z-name"> JoinHandle</span><span>&lt;</span><span>(</span><span>)</span><span>&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> file</span><span class="z-keyword"> =</span><span class="z-entity z-name"> fs</span><span class="z-keyword">::</span><span class="z-entity z-name">File</span><span class="z-keyword">::</span><span class="z-entity z-name">open</span><span>(</span><span class="z-variable z-other">file_path</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">expect</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">File should exist</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    thread</span><span class="z-keyword">::</span><span class="z-entity z-name">Builder</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">name</span><span>(</span><span class="z-entity z-name">format!</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">worker-</span><span class="z-string">{</span><span class="z-string">}</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-variable z-other"> index</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">spawn</span><span>(</span><span class="z-keyword">move</span><span class="z-keyword"> |</span><span class="z-keyword">|</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">            let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> archive</span><span class="z-keyword"> =</span><span class="z-entity z-name"> zip</span><span class="z-keyword">::</span><span class="z-entity z-name">ZipArchive</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">file</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">expect</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">Archive validated before-hand</span><span class="z-punctuation z-definition z-string">&quot;</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">            loop</span><span> {</span></span>
+<span class="giallo-l"><span class="z-keyword">                match</span><span class="z-variable z-other"> receive_password</span><span class="z-keyword">.</span><span class="z-entity z-name">recv</span><span>(</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                    Err</span><span>(</span><span class="z-variable z-other">_</span><span>)</span><span class="z-keyword"> =&gt;</span><span class="z-keyword"> break</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                    Ok</span><span>(</span><span class="z-variable z-other">password</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">                        let</span><span class="z-variable z-other"> res</span><span class="z-keyword"> =</span><span class="z-variable z-other"> archive</span><span class="z-keyword">.</span><span class="z-entity z-name">by_index_decrypt</span><span>(</span><span class="z-constant">0</span><span>,</span><span class="z-variable z-other"> password</span><span class="z-keyword">.</span><span class="z-entity z-name">as_bytes</span><span>(</span><span>)</span><span>)</span><span>;</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> decrypt first file in archive</span></span>
+<span class="giallo-l"><span class="z-keyword">                        match</span><span class="z-variable z-other"> res</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                            Err</span><span>(</span><span class="z-variable z-other">e</span><span>)</span><span class="z-keyword"> =&gt;</span><span class="z-entity z-name"> panic!</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">Unexpected error </span><span class="z-string">{</span><span class="z-string">:?</span><span class="z-string">}</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-variable z-other"> e</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                            Ok</span><span>(</span><span class="z-entity z-name">Err</span><span>(</span><span class="z-variable z-other">_</span><span>)</span><span>)</span><span class="z-keyword"> =&gt;</span><span> (</span><span>)</span><span>,</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> invalid password - continue</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                            Ok</span><span>(</span><span class="z-entity z-name">Ok</span><span>(</span><span class="z-variable z-other">_</span><span>)</span><span>)</span><span class="z-keyword"> =&gt;</span><span> {</span></span>
+<span class="giallo-l"><span class="z-entity z-name">                                println!</span><span>(</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-string">Password found:</span><span class="z-string">{</span><span class="z-string">}</span><span class="z-punctuation z-definition z-string">&quot;</span><span>,</span><span class="z-variable z-other"> password</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">                                break</span><span>;</span><span class="z-punctuation z-definition z-comment"> //</span><span class="z-comment"> stop thread</span></span>
+<span class="giallo-l"><span>                            }</span></span>
+<span class="giallo-l"><span>                        }</span></span>
+<span class="giallo-l"><span>                    }</span></span>
+<span class="giallo-l"><span>                }</span></span>
+<span class="giallo-l"><span>            }</span></span>
+<span class="giallo-l"><span>        }</span><span>)</span></span>
+<span class="giallo-l"><span class="z-keyword">        .</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>This straightforward approach is unfortunately not enough as it yields false positive passwords from time to time.</p>
+<p>The Rustdoc for <code>by_index_decrypt</code> actually warns about it.</p>
+
+<blockquote class="callout warning has-title">
+  
+  
+  <p class="title">
+    <span class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12.865 3.00017L22.3912 19.5002C22.6674 19.9785 22.5035 20.5901 22.0252 20.8662C21.8732 20.954 21.7008 21.0002 21.5252 21.0002H2.47266C1.92037 21.0002 1.47266 20.5525 1.47266 20.0002C1.47266 19.8246 1.51886 19.6522 1.60663 19.5002L11.1329 3.00017C11.4091 2.52187 12.0206 2.358 12.4989 2.63414C12.651 2.72191 12.7772 2.84815 12.865 3.00017ZM4.20471 19.0002H19.7932L11.9989 5.50017L4.20471 19.0002ZM10.9989 16.0002H12.9989V18.0002H10.9989V16.0002ZM10.9989 9.00017H12.9989V14.0002H10.9989V9.00017Z" fill="currentColor"></path></svg>
+
+    </span>
+    <strong>Warning</strong>
+  </p>
+  <div class="content">
+    <p>This function sometimes accepts wrong passwords.
+This is because the ZIP spec only allows us to check for a 1/256 chance that the password is correct.
+There are many passwords out there that will also pass the validity checks we are able to perform.
+This is a weakness of the ZipCrypto algorithm, due to its fairly primitive approach to cryptography.</p>
+
+  </div>
+  
+</blockquote>
+
+<p>We can work around those collisions by performing a full read of the archive with the password to make sure it is actually correct.</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span> use crossbeam_channel::{Receiver, Sender};</span></span>
+<span class="giallo-l"><span> use std::fs::File;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">use std::io::{BufRead, BufReader};</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">use std::io::{BufRead, BufReader, Read};</span></span>
+<span class="giallo-l"><span> use std::path::{Path, PathBuf};</span></span>
+<span class="giallo-l"><span> use std::thread::JoinHandle;</span></span>
+<span class="giallo-l"><span> use std::{fs, thread};</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -38,10 +38,14</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_checker(</span></span>
+<span class="giallo-l"><span>        let res = archive.by_index_decrypt(0, password.as_bytes()); // decrypt first file in archive</span></span>
+<span class="giallo-l"><span>        match res {</span></span>
+<span class="giallo-l"><span>            Err(e) =&gt; panic!(&quot;Unexpected error {:?}&quot;, e),</span></span>
+<span class="giallo-l"><span>            Ok(Err(_)) =&gt; (), // invalid password - continue</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">           Ok(Ok(_)) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">               println!(&quot;Password found:{}&quot;, password);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">               break; // stop thread</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">           Ok(Err(_)) =&gt; (), // invalid password</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">           Ok(Ok(mut zip)) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">               // Validate password by reading the zip file to make sure it is not merely a hash collision.</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">               let mut buffer = Vec::with_capacity(zip.size() as usize);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">               match zip.read_to_end(&amp;mut buffer) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                   Err(_) =&gt; (), // password collision - continue</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                   Ok(_) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                       println!(&quot;Password found:{}&quot;, password);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                       break; // stop thread</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                   }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">               }</span></span>
+<span class="giallo-l"><span>            }</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    }</span></span></code></pre>
+<p>Again, a few interesting things to note here:</p>
+<ul>
+<li>Each worker thread gets a unique name.</li>
+<li>The worker is <code>looping</code> until the password is found or the channel is closed.</li>
+<li>Each worker opens the Zip file in memory to avoid extra coordination.</li>
+<li>The password found is printed to the console.</li>
+</ul>
+<h2 id="putting-it-together">Putting it together<a class="zola-anchor" href="#putting-it-together" aria-label="Anchor link for: putting-it-together" style="visibility: hidden;"></a>
+</h2>
+<p>We can now wire things up together nicely and get one step closer to our goal.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">pub</span><span class="z-keyword"> fn</span><span class="z-entity z-name"> password_finder</span><span>(</span><span class="z-variable z-other">zip_path</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span class="z-entity z-name">str</span><span>,</span><span class="z-variable z-other"> password_list_path</span><span class="z-keyword">:</span><span class="z-keyword"> &amp;</span><span class="z-entity z-name">str</span><span>,</span><span class="z-variable z-other"> workers</span><span class="z-keyword">:</span><span class="z-entity z-name"> usize</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> zip_file_path</span><span class="z-keyword"> =</span><span class="z-entity z-name"> Path</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">zip_path</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> password_list_file_path</span><span class="z-keyword"> =</span><span class="z-entity z-name"> Path</span><span class="z-keyword">::</span><span class="z-entity z-name">new</span><span>(</span><span class="z-variable z-other">password_list_path</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">to_path_buf</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> channel with backpressure</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span> (</span><span class="z-variable z-other">send_password</span><span>,</span><span class="z-variable z-other"> receive_password</span><span>)</span><span class="z-keyword">:</span><span> (</span><span class="z-entity z-name">Sender</span><span>&lt;</span><span class="z-entity z-name">String</span><span>&gt;</span><span>,</span><span class="z-entity z-name"> Receiver</span><span>&lt;</span><span class="z-entity z-name">String</span><span>&gt;</span><span>)</span><span class="z-keyword"> =</span></span>
+<span class="giallo-l"><span class="z-entity z-name">        crossbeam_channel</span><span class="z-keyword">::</span><span class="z-entity z-name">bounded</span><span>(</span><span class="z-variable z-other">workers</span><span class="z-keyword"> *</span><span class="z-constant"> 10_000</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> thread handle for password reader</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> password_gen_handle</span><span class="z-keyword"> =</span><span class="z-entity z-name"> start_password_reader</span><span>(</span><span class="z-variable z-other">password_list_file_path</span><span>,</span><span class="z-variable z-other"> send_password</span><span>)</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> save all workers handles</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> worker_handles</span><span class="z-keyword"> =</span><span class="z-entity z-name"> Vec</span><span class="z-keyword">::</span><span class="z-entity z-name">with_capacity</span><span>(</span><span class="z-variable z-other">workers</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">    for</span><span class="z-variable z-other"> i</span><span class="z-keyword"> in</span><span class="z-constant"> 1</span><span class="z-keyword">..=</span><span class="z-variable z-other">workers</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">        let</span><span class="z-variable z-other"> join_handle</span><span class="z-keyword"> =</span><span class="z-entity z-name"> password_checker</span><span>(</span><span class="z-variable z-other">i</span><span>,</span><span class="z-variable z-other"> zip_file_path</span><span>,</span><span class="z-variable z-other"> receive_password</span><span class="z-keyword">.</span><span class="z-entity z-name">clone</span><span>(</span><span>)</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        worker_handles</span><span class="z-keyword">.</span><span class="z-entity z-name">push</span><span>(</span><span class="z-variable z-other">join_handle</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> wait for workers to finish</span></span>
+<span class="giallo-l"><span class="z-keyword">    for</span><span class="z-variable z-other"> h</span><span class="z-keyword"> in</span><span class="z-variable z-other"> worker_handles</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">        h</span><span class="z-keyword">.</span><span class="z-entity z-name">join</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-comment">    //</span><span class="z-comment"> wait for the end of the file</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    password_gen_handle</span><span class="z-keyword">.</span><span class="z-entity z-name">join</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>The first important point here is the use of a bounded channel between the password generator and the workers.</p>
+<p>A bounded channel will block the sender once its capacity is reached. This is handy to implement back-pressure.</p>
+<p>In our case, the producer is much faster than the consumers, so we are at risk of loading the entire dictionary inside the channel, which is not great for memory usage.</p>
+<p>To avoid slowing down the consumers, the capacity is sized according to the number of workers.</p>
+<p>Secondly, we are saving all <code>JoinHandle</code> to await the termination of all threads.</p>
+<p>And finally, the main function!</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-keyword">fn</span><span class="z-entity z-name"> main</span><span>(</span><span>)</span><span> {</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> zip_path</span><span class="z-keyword"> =</span><span class="z-entity z-name"> env</span><span class="z-keyword">::</span><span class="z-entity z-name">args</span><span>(</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">nth</span><span>(</span><span class="z-constant">1</span><span>)</span><span class="z-keyword">.</span><span class="z-entity z-name">unwrap</span><span>(</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> dictionary_path</span><span class="z-keyword"> =</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">/opt/xato-net-10-million-passwords.txt</span><span class="z-punctuation z-definition z-string">&quot;</span><span>;</span></span>
+<span class="giallo-l"><span class="z-storage z-type">    let</span><span class="z-variable z-other"> workers</span><span class="z-keyword"> =</span><span class="z-constant"> 3</span><span>;</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    password_finder</span><span>(</span><span class="z-keyword">&amp;</span><span class="z-variable z-other">zip_path</span><span>,</span><span class="z-variable z-other"> dictionary_path</span><span>,</span><span class="z-variable z-other"> workers</span><span>)</span><span>;</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>As a command line argument our program accepts the path to an encrypted Zip file, which will be brute forced using a dictionary with 3 workers.</p>
+<p>The dictionary path is hard-coded for the time being.</p>
+<p>For testing purposes, we need an archive encrypted using a password from the dictionary.</p>
+<p>I am picking the entry number 1.000.000, <code>vaanes</code>, to create our encrypted test zip.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">sed</span><span class="z-constant"> -</span><span class="z-constant">ne</span><span class="z-string"> 1000000p</span><span class="z-string"> xato-net-10-million-passwords.txt</span></span>
+<span class="giallo-l"><span class="z-entity z-name">vaanes</span></span></code></pre>
+<p>Here are the details of the test archive created using this password.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">zipinfo</span><span class="z-string"> encrypted-test-dict.zip</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">Archive:</span><span class="z-string">  encrypted-test-dict.zip</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Zip</span><span class="z-string"> file</span><span class="z-string"> size:</span><span class="z-constant"> 202</span><span class="z-string"> bytes,</span><span class="z-string"> number</span><span class="z-string"> of</span><span class="z-string"> entries:</span><span class="z-constant"> 1</span></span>
+<span class="giallo-l"><span class="z-entity z-name">-rw-rw-r--</span><span class="z-constant">  6.3</span><span class="z-string"> unx</span><span class="z-constant">        9</span><span class="z-string"> Bx</span><span class="z-string"> u099</span><span class="z-string"> 22-Sep-24</span><span class="z-string"> 12:19</span><span class="z-string"> test-xato</span></span>
+<span class="giallo-l"><span class="z-entity z-name">1</span><span class="z-string"> file,</span><span class="z-constant"> 9</span><span class="z-string"> bytes</span><span class="z-string"> uncompressed,</span><span class="z-constant"> 16</span><span class="z-string"> bytes</span><span class="z-string"> compressed:</span><span class="z-constant">  -</span><span class="z-constant">77.8%</span></span></code></pre>
+<p>It is pretty small and uses compression as a storage method.</p>
+<p>Let's run our program!</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-support">cd</span><span class="z-string"> /target/release</span></span>
+<span class="giallo-l"><span class="z-keyword">time</span><span> ./zip-password-finder encrypted-test-dict.zip</span></span></code></pre>
+<p>Checking on the CPU usage with <code>htop</code> yields an expected result.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;htop-3-workers.png"
+         alt="CPU usage with 3 workers"
+        
+        
+    >
+    
+</figure>
+<p>Three worker threads are going at full speed, and one thread is reading the passwords at a leisurely pace.</p>
+<p>After 4 minutes, the program prints on the terminal.</p>
+<pre class="giallo z-code"><code data-lang="plain"><span class="giallo-l"><span>Password found:vaanes</span></span></code></pre>
+<p>But the program does not terminate right away; it takes more than 20 minutes to finish!</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">real</span><span class="z-string">    23m36,203s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">user</span><span class="z-string">    72m29,567s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">sys</span><span class="z-string">     0m41,570s</span></span></code></pre>
+<p>First the good news: the program found the password!</p>
+<p>It processed 1 million passwords in around four minutes using 3 workers which gives us:</p>
+<pre class="giallo z-code"><code data-lang="plain"><span class="giallo-l"><span>1.000.000 passwords tested / (4 * 60 seconds) / 3 workers =</span></span>
+<span class="giallo-l"><span>1389 passwords tested per second per worker assuming linear scaling</span></span></code></pre>
+<p>This result provides us with an idea of what can be achieved with this approach.</p>
+<p>Secondly, the bad news: our program does not terminate properly, which is a big issue.</p>
+<h2 id="graceful-shutdown">Graceful shutdown<a class="zola-anchor" href="#graceful-shutdown" aria-label="Anchor link for: graceful-shutdown" style="visibility: hidden;"></a>
+</h2>
+<p>Looking at the code more closely, we can see that we terminate our threads only under specific conditions.</p>
+<p>For the password dictionary thread:</p>
+<ul>
+<li>If the channel has no consumers attached.</li>
+<li>If we reach the end of the dictionary.</li>
+</ul>
+<p>And for the worker threads:</p>
+<ul>
+<li>If the channel is empty and has no producer attached.</li>
+<li>If we find the password.</li>
+</ul>
+<p>This explains why our program kept on running previously; we only stopped the thread that found the password!</p>
+<p>The program went through the rest of the dictionary using only two workers.</p>
+<p>There are different ways to solve this problem. We will try to come up with an <strong>explicit</strong> shutdown sequence that does not rely on timeout nor on the channel being disconnected.</p>
+<p>We need a way for the worker thread that finds the password to be able to inform other threads that they can shut down.</p>
+<p>First, let's have worker threads communicate the password to the main thread instead of simply printing it out in the terminal.</p>
+<p>This design is much better and will enable unit testing later on!</p>
+<p>As a follow-up, once the main thread receives the password, it will notify all threads to stop using a thread-safe signal.</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span> use std::path::{Path, PathBuf};</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">use std::sync::atomic::{AtomicBool, Ordering};</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">use std::sync::Arc;</span></span>
+<span class="giallo-l"><span> use std::thread::JoinHandle;</span></span>
+<span class="giallo-l"><span> use std::{env, fs, thread};</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">pub fn start_password_reader(file_path: PathBuf, send_password: Sender&lt;String&gt;) -&gt; JoinHandle&lt;()&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">pub fn start_password_reader(</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    file_path: PathBuf,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    send_password: Sender&lt;String&gt;,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    stop_signal: Arc&lt;AtomicBool&gt;,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">) -&gt; JoinHandle&lt;()&gt; {</span></span>
+<span class="giallo-l"><span>     thread::Builder::new()</span></span>
+<span class="giallo-l"><span>         .name(&quot;password-reader&quot;.to_string())</span></span>
+<span class="giallo-l"><span>         .spawn(move || {</span></span>
+<span class="giallo-l"><span>             let file = File::open(file_path).unwrap();</span></span>
+<span class="giallo-l"><span>             let reader = BufReader::new(file);</span></span>
+<span class="giallo-l"><span>             for line in reader.lines() {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                match send_password.send(line.unwrap()) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                    Ok(_) =&gt; {}</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                    Err(_) =&gt; break, // channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                if stop_signal.load(Ordering::Relaxed) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    break;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                } else {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    match send_password.send(line.unwrap()) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        Ok(_) =&gt; {}</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        Err(_) =&gt; break, // channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    }</span></span>
+<span class="giallo-l"><span>                 }</span></span>
+<span class="giallo-l"><span>             }</span></span>
+<span class="giallo-l"><span>         })</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -25,13 +35,15</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_checker(</span></span>
+<span class="giallo-l"><span>     index: usize,</span></span>
+<span class="giallo-l"><span>     file_path: &amp;Path,</span></span>
+<span class="giallo-l"><span>     receive_password: Receiver&lt;String&gt;,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    stop_signal: Arc&lt;AtomicBool&gt;,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    send_password_found: Sender&lt;String&gt;,</span></span>
+<span class="giallo-l"><span> ) -&gt; JoinHandle&lt;()&gt; {</span></span>
+<span class="giallo-l"><span>     let file = fs::File::open(file_path).expect(&quot;File should exist&quot;);</span></span>
+<span class="giallo-l"><span>     thread::Builder::new()</span></span>
+<span class="giallo-l"><span>         .name(format!(&quot;worker-{}&quot;, index))</span></span>
+<span class="giallo-l"><span>         .spawn(move || {</span></span>
+<span class="giallo-l"><span>             let mut archive = zip::ZipArchive::new(file).expect(&quot;Archive validated before-hand&quot;);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">            loop {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            while !stop_signal.load(Ordering::Relaxed) {</span></span>
+<span class="giallo-l"><span>                 match receive_password.recv() {</span></span>
+<span class="giallo-l"><span>                     Err(_) =&gt; break, // channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span>                     Ok(password) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -44,7 +56,12</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_checker(</span></span>
+<span class="giallo-l"><span>                                 let mut buffer = Vec::with_capacity(zip.size() as usize);</span></span>
+<span class="giallo-l"><span>                                 match zip.read_to_end(&amp;mut buffer) {</span></span>
+<span class="giallo-l"><span>                                     Err(_) =&gt; (), // password collision - continue</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                    Ok(_) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                        println!(&quot;Password found:{}&quot;, password);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                        break; // stop thread</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                    Ok(_) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                        // Send password and continue processing while waiting for signal</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                        send_password_found</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                            .send(password)</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                            .expect(&quot;Send found password should not fail&quot;);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                    }</span></span>
+<span class="giallo-l"><span>                                 }</span></span>
+<span class="giallo-l"><span>                             }</span></span>
+<span class="giallo-l"><span>                         }</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -55,7 +72,7</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_checker(</span></span>
+<span class="giallo-l"><span>         .unwrap()</span></span>
+<span class="giallo-l"><span> }</span></span></code></pre>
+<p>The threads can exit their looping state by probing a stop signal materialized by an <code>Arc&lt;AtomicBool&gt;</code> which is safe and cheap to operate.</p>
+<p>Even the worker thread which finds the password will simply wait for the signal, this way we avoid having to handle the special case where there is only a single worker.</p>
+<p>And for the wiring and actual graceful shutdown.</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize) -&gt; Option&lt;String&gt; {</span></span>
+<span class="giallo-l"><span>     let zip_file_path = Path::new(zip_path);</span></span>
+<span class="giallo-l"><span>     let password_list_file_path = Path::new(password_list_path).to_path_buf();</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -63,28 +80,59</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)</span></span>
+<span class="giallo-l"><span>     let (send_password, receive_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =</span></span>
+<span class="giallo-l"><span>         crossbeam_channel::bounded(workers * 10_000);</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let (send_found_password, receive_found_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        crossbeam_channel::bounded(1);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    // stop signals to shut down threads</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let stop_workers_signal = Arc::new(AtomicBool::new(false));</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let stop_gen_signal = Arc::new(AtomicBool::new(false));</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span></span>
+<span class="giallo-l"><span>     // thread handle for password reader</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    let password_gen_handle = start_password_reader(password_list_file_path, send_password);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let password_gen_handle = start_password_reader(</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        password_list_file_path,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        send_password,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        stop_gen_signal.clone(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    );</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span>     // save all workers handles</span></span>
+<span class="giallo-l"><span>     let mut worker_handles = Vec::with_capacity(workers);</span></span>
+<span class="giallo-l"><span>     for i in 1..=workers {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">        let join_handle = password_checker(i, zip_file_path, receive_password.clone());</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        let join_handle = password_checker(</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            i,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            zip_file_path,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            receive_password.clone(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            stop_workers_signal.clone(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            send_found_password.clone(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        );</span></span>
+<span class="giallo-l"><span>         worker_handles.push(join_handle);</span></span>
+<span class="giallo-l"><span>     }</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    // wait for workers to finish</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    for h in worker_handles {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">        h.join().unwrap();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    // drop reference in `main` so that it disappears completely with workers for a clean shutdown</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    drop(send_found_password);</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    // wait for the end of the file</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    password_gen_handle.join().unwrap();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    match receive_found_password.recv() {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        Ok(password_found) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            // stop generating values first to avoid deadlock on channel</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            stop_gen_signal.store(true, Ordering::Relaxed);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            password_gen_handle.join().unwrap();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            // stop workers</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            stop_workers_signal.store(true, Ordering::Relaxed);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            for h in worker_handles {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                h.join().unwrap();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            Some(password_found)</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        Err(_) =&gt; None,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    }</span></span>
+<span class="giallo-l"><span> }</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span> fn main() {</span></span>
+<span class="giallo-l"><span>     let zip_path = env::args().nth(1).unwrap();</span></span>
+<span class="giallo-l"><span>     let dictionary_path = &quot;/home/agourlay/Workspace/blog-data/find-password-zip/xato-net-10-million-passwords.txt&quot;;</span></span>
+<span class="giallo-l"><span>     let workers = 3;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    password_finder(&amp;zip_path, dictionary_path, workers);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    match password_finder(&amp;zip_path, dictionary_path, workers) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        Some(password_found) =&gt; println!(&quot;Password found:{}&quot;, password_found),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        None =&gt; println!(&quot;No password found :(&quot;),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    }</span></span>
+<span class="giallo-l"><span> }</span></span>
+<span class="giallo-l"></span></code></pre>
+<p>The shutdown procedure must be carefully handled to avoid a deadlock of our threads.</p>
+<p>Using channels can make our threads block forever if the channel is not disconnected:</p>
+<ul>
+<li>A consuming thread blocks on an empty channel.</li>
+<li>A producing thread blocks on a full bounded channel.</li>
+</ul>
+<p>This makes the task more difficult given that signals are efficient only if the threads are able to run their inner loop.</p>
+<p>Given that we are using a bounded channel, it makes sense to shut down the producer first.</p>
+<p>In addition, it is important to manually drop <code>send_found_password</code> to shut down properly when no password is found:</p>
+<ol>
+<li>The password generator thread exits at the end of the dictionary.</li>
+<li>All workers exit when the channel is disconnected.</li>
+<li>All workers drop their clone of <code>Arc&lt;send_found_password&gt;</code>.</li>
+<li>Deadlock occurs: <code>receive_found_password.recv()</code> won't be triggered unless all producers are gone <strong>but</strong> the main thread still holds the initial <code>Arc&lt;send_found_password&gt;</code>.</li>
+</ol>
+<p>This gives us a valid shutdown sequence:</p>
+<ol>
+<li>Drop the initial <code>Arc&lt;send_found_password&gt;</code>.</li>
+<li>Wait for the found password from a worker.</li>
+<li>Toggle shutdown signal password generator.</li>
+<li>Join the password generator handle.</li>
+<li>Toggle shutdown signal for workers.</li>
+<li>Join all the worker handles.</li>
+</ol>
+<p>Finding a correct sequence can be a bit subtle, so it is better to test it.</p>
+<p>An alternative solution would be to use the timeout-flavored API <code>recv_timeout</code> and <code>send_timeout</code> which enable you to block only for a specific duration.</p>
+<p>I have decided to not use those as they are not strictly required, and it forces us to better understand our shutdown sequence :)</p>
+<p>Let's give it a try!</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-support">cd</span><span class="z-string"> /target/release</span></span>
+<span class="giallo-l"><span class="z-keyword">time</span><span> ./zip-password-finder encrypted-test-dict.zip</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Password</span><span class="z-string"> found:vaanes</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">real</span><span class="z-string">  4m23,968s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">user</span><span class="z-string">  13m30,767s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">sys</span><span class="z-string">   0m7,130s</span></span></code></pre>
+<p>This is much better; the application shuts down as soon as the password is found!</p>
+<p>But something important is still missing. As a user, we have no feedback while the program is waiting.</p>
+<p>It would be great to see how much progress the program is making and have an idea of the estimated run time.</p>
+<h2 id="progress-bar">Progress bar<a class="zola-anchor" href="#progress-bar" aria-label="Anchor link for: progress-bar" style="visibility: hidden;"></a>
+</h2>
+<p>The easiest way to visualize the progress of our program is to set up a progress bar.</p>
+<p>One of the best crates for this is <a rel="nofollow noreferrer external" href="https://github.com/console-rs/indicatif">Indicatif</a>.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">cargo</span><span class="z-string"> add</span><span class="z-string"> indicatif</span></span></code></pre>
+<p>The progress bar needs to be configured according to our use case.</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"></span>
+<span class="giallo-l"><span>     let zip_file_path = Path::new(zip_path);</span></span>
+<span class="giallo-l"><span>     let password_list_file_path = Path::new(password_list_path).to_path_buf();</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    // Setup progress bar</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let progress_bar = ProgressBar::new(0);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let progress_style = ProgressStyle::default_bar()</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        .template(&quot;[{elapsed_precise}] {wide_bar} {pos}/{len} throughput:{per_sec} (eta:{eta})&quot;)</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        .expect(&quot;Failed to create progress style&quot;);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    progress_bar.set_style(progress_style);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    // Refresh terminal 2 times per second to avoid flickering effect</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let draw_target = ProgressDrawTarget::stdout_with_hz(2);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    progress_bar.set_draw_target(draw_target);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    // Size progress bar according to dictionary size</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let file =</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        BufReader::new(File::open(password_list_file_path.clone()).expect(&quot;Unable to open file&quot;));</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let total_password_count = file.lines().count();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    progress_bar.set_length(total_password_count as u64);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span></span>
+<span class="giallo-l"><span>     // MPMC channel with backpressure</span></span>
+<span class="giallo-l"><span>     let (send_password, receive_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =</span></span>
+<span class="giallo-l"><span>         crossbeam_channel::bounded(workers * 10_000);</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -103,6 +122,7</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)</span></span>
+<span class="giallo-l"><span>             receive_password.clone(),</span></span>
+<span class="giallo-l"><span>             stop_workers_signal.clone(),</span></span>
+<span class="giallo-l"><span>             send_found_password.clone(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            progress_bar.clone(),</span></span>
+<span class="giallo-l"><span>         );</span></span>
+<span class="giallo-l"><span>         worker_handles.push(join_handle);</span></span>
+<span class="giallo-l"><span>     }</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -120,6 +140,7</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)</span></span>
+<span class="giallo-l"><span>             for h in worker_handles {</span></span>
+<span class="giallo-l"><span>                 h.join().unwrap();</span></span>
+<span class="giallo-l"><span>             }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            progress_bar.finish_and_clear();</span></span>
+<span class="giallo-l"><span>             Some(password_found)</span></span>
+<span class="giallo-l"><span>         }</span></span>
+<span class="giallo-l"><span>         Err(_) =&gt; None,</span></span></code></pre>
+<p>The most important points are:</p>
+<ul>
+<li>We set up a template to display some useful information regarding processing speed and ETA.</li>
+<li>The progress bar refresh rate is fixed to avoid flickering due to the high frequency of updates.</li>
+<li>The progress bar length is sized according to the length of the dictionary.</li>
+</ul>
+<p>The integration is rather straightforward on the workers' side; simply increment the progress bar after each candidate.</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -37,6 +38,7</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_checker(</span></span>
+<span class="giallo-l"><span>     receive_password: Receiver&lt;String&gt;,</span></span>
+<span class="giallo-l"><span>     stop_signal: Arc&lt;AtomicBool&gt;,</span></span>
+<span class="giallo-l"><span>     send_password_found: Sender&lt;String&gt;,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    progress_bar: ProgressBar,</span></span>
+<span class="giallo-l"><span> ) -&gt; JoinHandle&lt;()&gt; {</span></span>
+<span class="giallo-l"><span>     let file = fs::File::open(file_path).expect(&quot;File should exist&quot;);</span></span>
+<span class="giallo-l"><span>     thread::Builder::new()</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -65,6 +67,7</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_checker(</span></span>
+<span class="giallo-l"><span>                                 }</span></span>
+<span class="giallo-l"><span>                             }</span></span>
+<span class="giallo-l"><span>                         }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        progress_bar.inc(1);</span></span>
+<span class="giallo-l"><span>                     }</span></span>
+<span class="giallo-l"><span>                 }</span></span>
+<span class="giallo-l"><span>             }</span></span>
+<span class="giallo-l"></span></code></pre>
+<p>Running this new version displays our new fancy progress bar in action!</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;progressbar.png"
+         alt="Progress bar"
+        
+        
+    >
+    
+</figure>
+<p>The processing speed and ETA confirm our previous observations.</p>
+<p>But can we go any faster?</p>
+<h2 id="scaling-up">Scaling up<a class="zola-anchor" href="#scaling-up" aria-label="Anchor link for: scaling-up" style="visibility: hidden;"></a>
+</h2>
+<p>We previously found that the program can test around 1389 passwords per second per worker when used with 3 workers.</p>
+<p>What about automatically sizing the number of workers according to the host?</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span> use std::sync::atomic::{AtomicBool, Ordering};</span></span>
+<span class="giallo-l"><span> use std::sync::Arc;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">use std::thread::JoinHandle;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">use std::thread::{available_parallelism, JoinHandle};</span></span>
+<span class="giallo-l"><span> use std::{env, fs, thread};</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">use std::cmp::max;</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span> pub fn start_password_reader(</span></span>
+<span class="giallo-l"><span>     file_path: PathBuf,</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -151,7 +152,8</span><span class="z-meta z-diff z-range"> @@</span><span> fn main() {</span></span>
+<span class="giallo-l"><span>     let zip_path = env::args().nth(1).unwrap();</span></span>
+<span class="giallo-l"><span>     let dictionary_path = &quot;/opt/xato-net-10-million-passwords.txt&quot;;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    let workers = 3;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let num_cores = available_parallelism().unwrap().get();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let workers = max(1,  num_cores - 1);</span></span></code></pre>
+<p>With this change, we are using <code>num_cores - 1</code> worker threads and one dictionary reader thread.</p>
+<p>On my 8-core machine, it yields the following usage.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;htop-7-workers.png"
+         alt="CPU usage 7 workers"
+        
+        
+    >
+    
+</figure>
+<p>This is a nice CPU utilization to keep you warm during the winter.</p>
+<p>Unfortunately, it does not seem to be much faster.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-support">cd</span><span class="z-string"> /target/release</span></span>
+<span class="giallo-l"><span class="z-keyword">time</span><span> ./zip-password-finder encrypted-test-dict.zip</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Password</span><span class="z-string"> found:vaanes</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span class="z-entity z-name">real</span><span class="z-string">  3m57,826s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">user</span><span class="z-string">  27m52,591s</span></span>
+<span class="giallo-l"><span class="z-entity z-name">sys</span><span class="z-string">   0m9,621s</span></span></code></pre>
+<p>That is barely 30 seconds faster than the 3 workers version!</p>
+<p>It seems our program is suffering from scalability issues.</p>
+<p>To investigate this, let's start by making the number of workers configurable through the CLI.</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span> fn main() {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    let zip_path = env::args().nth(1).unwrap();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let mut args_iter = env::args().skip(1);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let zip_path = args_iter.next().unwrap();</span></span>
+<span class="giallo-l"><span>     let dictionary_path = &quot;/opt/xato-net-10-million-passwords.txt&quot;;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    let num_cores = available_parallelism().unwrap().get();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    let workers = max(1,  num_cores - 1);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let workers: usize = match args_iter.next() {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        None =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            let num_cores = available_parallelism().unwrap().get();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            max(1, num_cores - 1)</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        Some(count) =&gt; count.parse().unwrap(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    };</span></span></code></pre>
+<p>Then let's reach for our favorite CLI benchmarking tool, the fantastic <a rel="nofollow noreferrer external" href="https://github.com/sharkdp/hyperfine">hyperfine</a>.</p>
+<p>Using the following magic incantation, we will get reliable measurements for runs with different worker count.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">hyperfine</span><span class="z-constant"> -</span><span class="z-constant">-runs</span><span class="z-constant"> 2</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-warmup</span><span class="z-constant"> 1</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-markdown</span><span class="z-string"> workers.md</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-json</span><span class="z-string"> workers.json</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 1</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 1</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 2</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 2</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 3</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 3</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 4</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 4</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 5</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 5</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 6</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 6</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 7</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 7</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 8</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 8</span><span class="z-punctuation z-definition z-string">&quot;</span><span> </span></span></code></pre>
+<p>After the runs, the <code>workers.md</code> file contains the following table:</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>1</code></td><td style="text-align: right">559.522 ± 7.091</td><td style="text-align: right">554.509</td><td style="text-align: right">564.536</td><td style="text-align: right">2.51 ± 0.03</td></tr>
+<tr><td style="text-align: left"><code>2</code></td><td style="text-align: right">338.590 ± 0.102</td><td style="text-align: right">338.518</td><td style="text-align: right">338.662</td><td style="text-align: right">1.52 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>3</code></td><td style="text-align: right">264.297 ± 0.650</td><td style="text-align: right">263.838</td><td style="text-align: right">264.757</td><td style="text-align: right">1.18 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>4</code></td><td style="text-align: right">223.284 ± 0.047</td><td style="text-align: right">223.251</td><td style="text-align: right">223.317</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>5</code></td><td style="text-align: right">224.617 ± 0.082</td><td style="text-align: right">224.559</td><td style="text-align: right">224.675</td><td style="text-align: right">1.01 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>6</code></td><td style="text-align: right">226.690 ± 0.421</td><td style="text-align: right">226.392</td><td style="text-align: right">226.987</td><td style="text-align: right">1.02 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>7</code></td><td style="text-align: right">232.129 ± 0.009</td><td style="text-align: right">232.122</td><td style="text-align: right">232.135</td><td style="text-align: right">1.04 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>8</code></td><td style="text-align: right">234.367 ± 0.118</td><td style="text-align: right">234.284</td><td style="text-align: right">234.450</td><td style="text-align: right">1.05 ± 0.00</td></tr>
+</tbody></table>
+<p>It looks quite bad. Let's plot it so that visual people can be disappointed as well.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;whiskers.png"
+         alt="Whiskers plot"
+        
+        
+    >
+    
+</figure>
+<p>One would expect performance to grow linearly, but that is absolutely not the case here.</p>
+<p>Not only is the speedup not linear, but the program only gets faster up to 4 workers at approximately 4500 passwords/sec.</p>
+<p>Sounds like a good time to mention <a rel="nofollow noreferrer external" href="https://en.wikipedia.org/wiki/Amdahl%27s_law">Amdahl's law</a>, which predicts the theoretical speedup when using multiple processors depending on the portion of the work being parallel.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;AmdahlsLaw-wiki.png"
+         alt="AmdahlsLaw graph"
+        
+        
+    >
+    
+</figure>
+<p>Our workload is <strong>supposed</strong> to be very parallelisable, each worker processing candidate passwords in isolation at full speed. We should be getting more impressive speedups.</p>
+<p>The simplest explanation is that our program is not as parallel as we thought. There must be some form of hidden coordination preventing our program from scaling properly.</p>
+<h2 id="hyper-threading">Hyper-threading<a class="zola-anchor" href="#hyper-threading" aria-label="Anchor link for: hyper-threading" style="visibility: hidden;"></a>
+</h2>
+<p>However, I find it very suspicious that the best performance occurs at 4 workers. This is a nice power of 2.</p>
+<p>I am running the benchmarks on a laptop running Linux on an Intel <a rel="nofollow noreferrer external" href="https://www.intel.com/content/www/us/en/products/sku/201896/intel-core-i710610u-processor-8m-cache-up-to-4-90-ghz/specifications.html">i7-10610U</a> CPU.</p>
+<p>Looking at the specification, we can see the following.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">lscpu</span></span>
+<span class="giallo-l"><span class="z-support">.</span><span class="z-support">.</span><span class="z-support">.</span></span>
+<span class="giallo-l"><span class="z-entity z-name">Vendor</span><span class="z-string"> ID:</span><span class="z-string">               GenuineIntel</span></span>
+<span class="giallo-l"><span class="z-entity z-name">  Model</span><span class="z-string"> name:</span><span class="z-string">            Intel</span><span>(</span><span class="z-entity z-name">R</span><span>)</span><span class="z-string"> Core</span><span>(</span><span class="z-entity z-name">TM</span><span>)</span><span class="z-string"> i7-10610U</span><span class="z-string"> CPU</span><span class="z-string"> @</span><span class="z-string"> 1.80GHz</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    CPU</span><span class="z-string"> family:</span><span class="z-constant">          6</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Model:</span><span class="z-constant">               142</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Thread(s</span><span>) per core:  2</span></span>
+<span class="giallo-l"><span class="z-entity z-name">    Core(s</span><span>) per socket:  4</span></span></code></pre>
+<p>Instead of 8 cores, there are 4 physical cores and 2 logical threads per core!</p>
+<p>In my case this is <a rel="nofollow noreferrer external" href="https://en.wikipedia.org/wiki/Hyper-threading">Intel's Hyper-threading Technology</a>, which enables cores to have two lanes of execution. The core can switch between those while waiting for data to be fetched from main memory or caches.</p>
+<p>Outside the various marketing performance claims from Intel, it seems that <code>Hyper-threading</code> is not adapted to all types of workload.</p>
+<p>Given our very CPU-heavy workload, in which we need the full attention of each core on a single worker. It makes sense to not rely on it and only use the number of physical cores to size the number of workers.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">cargo</span><span class="z-string"> add</span><span class="z-string"> num_cpus</span></span></code></pre>
+<p>The previous benchmark has also shown that the best performance occurs where the number of workers is equal to the number of cores, meaning that the reader thread is very cheap in comparison.</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span>     let workers: usize = match args_iter.next() {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">        None =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">            let num_cores = available_parallelism().unwrap().get();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">            max(1, num_cores - 1)</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">        }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        None =&gt; num_cpus::get_physical(),</span></span>
+<span class="giallo-l"><span>         Some(count) =&gt; count.parse().unwrap(),</span></span>
+<span class="giallo-l"><span>     };</span></span>
+<span class="giallo-l"></span></code></pre>
+<p>Hopefully, those workers will be allocated to different cores even if the host supports <code>Hyper-threading</code> for maximum efficiency.</p>
+<h2 id="going-faster">Going faster<a class="zola-anchor" href="#going-faster" aria-label="Anchor link for: going-faster" style="visibility: hidden;"></a>
+</h2>
+<p>Even limiting ourselves to physical cores, the scaling from one to four cores was not entirely linear.</p>
+<p>For a quick sanity check, we can generate a flamegraph to see where the CPU time is spent.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;flamegraph.png"
+         alt="Flamegraph"
+        
+        
+    >
+    
+</figure>
+<p>The various threads are nicely visible (full <a href="/2022-10-03/flamegraph.svg">flamegraph</a> available).</p>
+<p>It seems the reader thread spends most of its time snoozing, blocked when the channel is full, meaning that it is not a bottleneck.</p>
+<p>We can zoom in on one of the workers.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;flamegraph-worker.png"
+         alt="Flamegraph"
+        
+        
+    >
+    
+</figure>
+<p>It is basically spending most of its time in <code>sha1::compress::soft::compress</code> in a deep call stack from <code>zip-rs</code>.</p>
+<p>There is nothing obvious to optimize from our worker code given the decryption API we have to work with.</p>
+<p>We can focus on decreasing potential synchronization issues between our worker threads. When can they possibly interfere with each other?</p>
+<p>Looking at the code closely, we can see that for every password candidate the workers are accessing:</p>
+<ul>
+<li>the receive channel handle</li>
+<li>the shutdown signal</li>
+<li>the progress bar</li>
+</ul>
+<p>A first hypothesis is that those actions increase the cost of processing a single candidate and introduce some form of coordination between threads as they are accessing shared memory.</p>
+<p>A naive approach to reducing coordination is to give more to the workers to process in isolation by, for instance, batching up a bunch of candidates together in the channel.</p>
+<p>What would the optimal batch size be? Let's implement batching and make the batch size configurable in place of the "workers" argument for a quick experiment.</p>
+<p>First batching the reader thread:</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span> pub fn start_password_reader(</span></span>
+<span class="giallo-l"><span>     file_path: PathBuf,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    send_password: Sender&lt;String&gt;,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    send_password: Sender&lt;Vec&lt;String&gt;&gt;,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    batch_size: usize,</span></span>
+<span class="giallo-l"><span>     stop_signal: Arc&lt;AtomicBool&gt;,</span></span>
+<span class="giallo-l"><span> ) -&gt; JoinHandle&lt;()&gt; {</span></span>
+<span class="giallo-l"><span>     thread::Builder::new()</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -19,13 +20,18</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn start_password_reader(</span></span>
+<span class="giallo-l"><span>         .spawn(move || {</span></span>
+<span class="giallo-l"><span>             let file = File::open(file_path).unwrap();</span></span>
+<span class="giallo-l"><span>             let reader = BufReader::new(file);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">            let mut batch = Vec::with_capacity(batch_size);</span></span>
+<span class="giallo-l"><span>             for line in reader.lines() {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                if stop_signal.load(Ordering::Relaxed) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                    break;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                } else {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                    match send_password.send(line.unwrap()) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                        Ok(_) =&gt; {}</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                        Err(_) =&gt; break, // channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                batch.push(line.unwrap());</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                // push once the batch is full</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                if batch.len() == batch_size {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    if stop_signal.load(Ordering::Relaxed) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        break;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    } else {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        match send_password.send(batch.clone()) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                            Ok(_) =&gt; batch.clear(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                            Err(_) =&gt; break, // channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        }</span></span>
+<span class="giallo-l"><span>                     }</span></span></code></pre>
+<p>Then the worker thread:</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span> pub fn password_checker(</span></span>
+<span class="giallo-l"><span>     index: usize,</span></span>
+<span class="giallo-l"><span>     file_path: &amp;Path,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    receive_password: Receiver&lt;String&gt;,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    receive_password: Receiver&lt;Vec&lt;String&gt;&gt;,</span></span>
+<span class="giallo-l"><span>     stop_signal: Arc&lt;AtomicBool&gt;,</span></span>
+<span class="giallo-l"><span>     send_password_found: Sender&lt;String&gt;,</span></span>
+<span class="giallo-l"><span>     progress_bar: ProgressBar,</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -49,26 +55,30</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_checker(</span></span>
+<span class="giallo-l"><span>             while !stop_signal.load(Ordering::Relaxed) {</span></span>
+<span class="giallo-l"><span>                 match receive_password.recv() {</span></span>
+<span class="giallo-l"><span>                     Err(_) =&gt; break, // channel disconnected, stop thread</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                    Ok(password) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                        let res = archive.by_index_decrypt(0, password.as_bytes());</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                        match res {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                            Err(e) =&gt; panic!(&quot;Unexpected error {:?}&quot;, e),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                            Ok(Err(_)) =&gt; (), // invalid password - continue</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                            Ok(Ok(mut zip)) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                // Validate password by reading the zip file to make sure it is not merely a hash collision.</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                let mut buffer = Vec::with_capacity(zip.size() as usize);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                match zip.read_to_end(&amp;mut buffer) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                    Err(_) =&gt; (), // password collision - continue</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                    Ok(_) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                        // Send password and continue processing while waiting for signal</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                        send_password_found</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                            .send(password)</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                                            .expect(&quot;Send found password should not fail&quot;);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                    Ok(passwords) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        let passwords_len = passwords.len() as u64;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        // process batch</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        for password in passwords {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                            let res = archive.by_index_decrypt(0, password.as_bytes());</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                            match res {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                Err(e) =&gt; panic!(&quot;Unexpected error {:?}&quot;, e),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                Ok(Err(_)) =&gt; (), // invalid password - continue</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                Ok(Ok(mut zip)) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                    // Validate password by reading the zip file to make sure it is not merely a hash collision.</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                    let mut buffer = Vec::with_capacity(zip.size() as usize);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                    match zip.read_to_end(&amp;mut buffer) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                        Err(_) =&gt; (), // password collision - continue</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                        Ok(_) =&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                            // Send password and continue processing while waiting for signal</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                            send_password_found</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                                .send(password)</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                                .expect(&quot;Send found password should not fail&quot;);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                                        }</span></span>
+<span class="giallo-l"><span>                                     }</span></span>
+<span class="giallo-l"><span>                                 }</span></span>
+<span class="giallo-l"><span>                             }</span></span>
+<span class="giallo-l"><span>                         }</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">                        progress_bar.inc(1);</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">                        progress_bar.inc(passwords_len);</span></span>
+<span class="giallo-l"><span>                     }</span></span>
+<span class="giallo-l"><span>                 }</span></span>
+<span class="giallo-l"><span>             }</span></span></code></pre>
+<p>And a bit of wiring up:</p>
+<pre class="giallo z-code"><code data-lang="diff"><span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize) -&gt; Option&lt;String&gt; {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize, batch_size: usize) -&gt; Option&lt;String&gt; {</span></span>
+<span class="giallo-l"><span>     let zip_file_path = Path::new(zip_path);</span></span>
+<span class="giallo-l"><span>     let password_list_file_path = Path::new(password_list_path).to_path_buf();</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -97,7 +107,7</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)</span></span>
+<span class="giallo-l"><span>     progress_bar.set_length(total_password_count as u64);</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span>     // MPMC channel with backpressure</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    let (send_password, receive_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let (send_password, receive_password): (Sender&lt;Vec&lt;String&gt;&gt;, Receiver&lt;Vec&lt;String&gt;&gt;) =</span></span>
+<span class="giallo-l"><span>         crossbeam_channel::bounded(workers * 10_000);</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span>     let (send_found_password, receive_found_password): (Sender&lt;String&gt;, Receiver&lt;String&gt;) =</span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -111,6 +121,7</span><span class="z-meta z-diff z-range"> @@</span><span> pub fn password_finder(zip_path: &amp;str, password_list_path: &amp;str, workers: usize)</span></span>
+<span class="giallo-l"><span>     let password_gen_handle = start_password_reader(</span></span>
+<span class="giallo-l"><span>         password_list_file_path,</span></span>
+<span class="giallo-l"><span>         send_password,</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">        batch_size,</span></span>
+<span class="giallo-l"><span>         stop_gen_signal.clone(),</span></span>
+<span class="giallo-l"><span>     );</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-meta z-diff z-range">@@</span><span class="z-meta z-diff z-range"> -153,12 +164,11</span><span class="z-meta z-diff z-range"> @@</span><span> fn main() {</span></span>
+<span class="giallo-l"><span>     let zip_path = args_iter.next().unwrap();</span></span>
+<span class="giallo-l"><span>     let dictionary_path =</span></span>
+<span class="giallo-l"><span>         &quot;/home/agourlay/Workspace/blog-data/find-password-zip/xato-net-10-million-passwords.txt&quot;;</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    let workers: usize = match args_iter.next() {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">        None =&gt; num_cpus::get_physical(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">        Some(count) =&gt; count.parse().unwrap(),</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    };</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let batch_size: usize = args_iter.next().unwrap().parse().unwrap();</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    let workers: usize = num_cpus::get_physical();</span></span>
+<span class="giallo-l"><span> </span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-deleted">-</span><span class="z-markup z-deleted">    match password_finder(&amp;zip_path, dictionary_path, workers) {</span></span>
+<span class="giallo-l"><span class="z-punctuation z-definition z-inserted">+</span><span class="z-markup z-inserted">    match password_finder(&amp;zip_path, dictionary_path, workers, batch_size) {</span></span>
+<span class="giallo-l"><span>         Some(password_found) =&gt; println!(&quot;Password found:{}&quot;, password_found),</span></span>
+<span class="giallo-l"><span>         None =&gt; println!(&quot;No password found :(&quot;),</span></span>
+<span class="giallo-l"><span>     }</span></span></code></pre>
+<p>Using Hyperfine again, we will compare different batch sizes.</p>
+<pre class="giallo z-code"><code data-lang="shellscript"><span class="giallo-l"><span class="z-entity z-name">hyperfine</span><span class="z-constant"> -</span><span class="z-constant">-runs</span><span class="z-constant"> 2</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-warmup</span><span class="z-constant"> 1</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-markdown</span><span class="z-string"> batch.md</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">-export-json</span><span class="z-string"> batch.json</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 10</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 10</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 50</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 50</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 100</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 100</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 500</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 500</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 1000</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 1000</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 5000</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 5000</span><span class="z-punctuation z-definition z-string">&quot;</span><span class="z-constant"> \</span></span>
+<span class="giallo-l"><span class="z-constant"> -</span><span class="z-constant">n</span><span class="z-constant"> 10000</span><span class="z-punctuation z-definition z-string"> &quot;</span><span class="z-string">./zip-password-finder encrypted-test-dict.zip 10000</span><span class="z-punctuation z-definition z-string">&quot;</span><span> </span></span></code></pre>
+<p>It seems <code>1000</code> yields the best results.</p>
+<table><thead><tr><th style="text-align: left">Command</th><th style="text-align: right">Mean [s]</th><th style="text-align: right">Min [s]</th><th style="text-align: right">Max [s]</th><th style="text-align: right">Relative</th></tr></thead><tbody>
+<tr><td style="text-align: left"><code>10</code></td><td style="text-align: right">234.756 ± 0.292</td><td style="text-align: right">234.550</td><td style="text-align: right">234.963</td><td style="text-align: right">1.09 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>50</code></td><td style="text-align: right">226.616 ± 9.372</td><td style="text-align: right">219.989</td><td style="text-align: right">233.243</td><td style="text-align: right">1.05 ± 0.04</td></tr>
+<tr><td style="text-align: left"><code>100</code></td><td style="text-align: right">216.498 ± 1.364</td><td style="text-align: right">215.534</td><td style="text-align: right">217.462</td><td style="text-align: right">1.00 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>500</code></td><td style="text-align: right">217.122 ± 1.992</td><td style="text-align: right">215.714</td><td style="text-align: right">218.531</td><td style="text-align: right">1.00 ± 0.01</td></tr>
+<tr><td style="text-align: left"><code>1000</code></td><td style="text-align: right">216.080 ± 0.066</td><td style="text-align: right">216.033</td><td style="text-align: right">216.127</td><td style="text-align: right">1.00</td></tr>
+<tr><td style="text-align: left"><code>5000</code></td><td style="text-align: right">218.929 ± 0.114</td><td style="text-align: right">218.848</td><td style="text-align: right">219.009</td><td style="text-align: right">1.01 ± 0.00</td></tr>
+<tr><td style="text-align: left"><code>10000</code></td><td style="text-align: right">222.792 ± 0.213</td><td style="text-align: right">222.642</td><td style="text-align: right">222.943</td><td style="text-align: right">1.03 ± 0.00</td></tr>
+</tbody></table>
+<p>However, the version without batching for 4 cores used to run in 224 seconds. That's only an 8-second improvement. I am not sure if it is worth the added complexity.</p>
+<p>We started from a wild guess regarding the source of the synchronization, so we should not be surprised by the disappointing results.</p>
+<p>We are stopping the performance investigation here in order to save some content for the future :)</p>
+<h2 id="password-generator">Password generator<a class="zola-anchor" href="#password-generator" aria-label="Anchor link for: password-generator" style="visibility: hidden;"></a>
+</h2>
+<p>Our dictionary approach was great to get us started, but in real life, it is rather improbable to find the password you are targeting within a dictionary.</p>
+<p>Well, at least it did not work for me.</p>
+<p>A password generator is present in the final code available at <a rel="nofollow noreferrer external" href="https://github.com/agourlay/zip-password-finder">zip-password-finder</a>, but I won't go into the implementation details because the code is rather ugly and does not add much at this point.</p>
+<p>What we need is to generate all the possible passwords based on a set of constraints.</p>
+<p>First, the minimum and maximum length to generate. For instance, between 3 and 7 characters.</p>
+<p>Second, the charset to use. It could be only letters, with uppercase, maybe with digits and punctuation.</p>
+<p>We can compute the number of passwords possible based on those constraints.</p>
+<pre class="giallo z-code"><code data-lang="rust"><span class="giallo-l"><span class="z-storage z-type">let</span><span class="z-storage"> mut</span><span class="z-variable z-other"> total_password_count</span><span class="z-keyword"> =</span><span class="z-constant"> 0</span><span>;</span></span>
+<span class="giallo-l"><span class="z-keyword">for</span><span class="z-variable z-other"> i</span><span class="z-keyword"> in</span><span class="z-variable z-other"> min_password_len</span><span class="z-keyword">..=</span><span class="z-variable z-other">max_password_len</span><span> {</span></span>
+<span class="giallo-l"><span class="z-variable z-other">    total_password_count</span><span class="z-keyword"> +=</span><span class="z-variable z-other"> charset_len</span><span class="z-keyword">.</span><span class="z-entity z-name">pow</span><span>(</span><span class="z-variable z-other">i</span><span class="z-keyword"> as</span><span class="z-entity z-name"> u32</span><span>)</span></span>
+<span class="giallo-l"><span>}</span></span></code></pre>
+<p>Here is an example to convince yourself that this grows very fast.</p>
+<p>Given a charset with lowercase letters, upper case letters and digits. Forming a set of <code>26 + 26 + 10 = 62</code> elements.</p>
+<p>A simple 7-character password using elements from this charset yields <code>62^7 = 3.521.614.606.208</code> combinations.</p>
+<p><code>62^7 passwords / 4500 passwords per sec / 60 / 60 / 24 / 365 =~ 25 years</code></p>
+<p>A naive brute force strategy requires much better performance to be tractable.</p>
+<h2 id="future-work">Future work<a class="zola-anchor" href="#future-work" aria-label="Anchor link for: future-work" style="visibility: hidden;"></a>
+</h2>
+<p>I still have not found the password for the archive that spawned this experiment and article.</p>
+<p>However, given the current throughput, I'd have to let the program run for much longer than I am comfortable with.</p>
+<p>Fixing the scalability issue is the most important task to make this application run efficiently on machines with a higher core count.</p>
+<p>Then, improving the nominal performance per worker by investigating possible gains in the <code>zip-rs</code> crate or a different approach to get a multiplying effect.</p>
+<p>I will make sure to document my progress in a follow-up article.</p>
+<h2 id="conclusion">Conclusion<a class="zola-anchor" href="#conclusion" aria-label="Anchor link for: conclusion" style="visibility: hidden;"></a>
+</h2>
+<p>In this article we have built a simple tool in Rust to brute force the password of protected ZIP archives.</p>
+<p>It can process around 4500 passwords/sec on 4-core machines and has issues scaling up which makes it impractical for non-trivial passwords.</p>
+<p>To get there we have learned how to apply the <code>pool of workers</code> pattern and how to shut it down gracefully.</p>
+<p>We also learned how to measure performance in a systematic way and discussed scalability expectations.</p>
+<p>At a more general level, we confirmed that long passwords are very efficient against brute force attacks.</p>
+<p>This fact has been very well described in this <a rel="nofollow noreferrer external" href="https://xkcd.com/936/">xkcd</a> comic.</p>
+
+    
+
+<figure>
+    <img
+        src="&#x2F;2022-10-03&#x2F;xkcd_password_strength.png"
+         alt="XKCD 936"
+        
+        
+    >
+    
+</figure>
+<p>And that's all for today, I hope you learned a thing or two on the way - thank you for making it to the end!</p>
+<p>If you want to play with the application, the full code with better error handling &amp; proper CLI is available at <a rel="nofollow noreferrer external" href="https://github.com/agourlay/zip-password-finder">zip-password-finder</a>.</p>
+
+<blockquote class="callout note has-title">
+  
+  
+  <p class="title">
+    <span class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z" fill="currentColor"></path></svg>
+
+    </span>
+    <strong>Update</strong>
+  </p>
+  <div class="content">
+    <p>The article submission on <a rel="nofollow noreferrer external" href="https://www.reddit.com/r/rust/comments/xv94o6/brute_forcing_protected_zip_archives_in_rust/">reddit/r/rust</a> contains excellent comments.</p>
+
+  </div>
+  
+</blockquote>
+
+
+      </article>
+
+      
+      
+
+      
+      
+    </div>
+
+    <footer>
+  <div class="left">
+    <div class="copyright">
+      © 2026 Arnaud Gourlay
+      
+      <span>|</span>
+      Built with <a href="https://www.getzola.org" rel="noreferrer" target="_blank">zola</a> and <a href="https://github.com/isunjn/serene" rel="noreferrer" target="_blank">serene</a>
+      
+    </div>
+    <div class="sponsor">
+      Enjoying my work? Consider <a href="https://github.com/sponsors/agourlay" rel="noreferrer" target="_blank">sponsoring me</a> on GitHub.
+    </div>
+  </div>
+
+  <div class="right">
+    
+    <a id="rss-btn" href="https://agourlay.github.io/atom.xml" aria-label="RSS feed">RSS</a>
+    
+
+    
+    
+    
+    <button id="theme-toggle" aria-label="theme switch">
+      <span class="moon-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M10 7C10 10.866 13.134 14 17 14C18.9584 14 20.729 13.1957 21.9995 11.8995C22 11.933 22 11.9665 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C12.0335 2 12.067 2 12.1005 2.00049C10.8043 3.27098 10 5.04157 10 7ZM4 12C4 16.4183 7.58172 20 12 20C15.0583 20 17.7158 18.2839 19.062 15.7621C18.3945 15.9187 17.7035 16 17 16C12.0294 16 8 11.9706 8 7C8 6.29648 8.08133 5.60547 8.2379 4.938C5.71611 6.28423 4 8.9417 4 12Z" fill="currentColor"></path></svg>
+</span>
+      <span class="sun-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18"><path d="M12 18C8.68629 18 6 15.3137 6 12C6 8.68629 8.68629 6 12 6C15.3137 6 18 8.68629 18 12C18 15.3137 15.3137 18 12 18ZM12 16C14.2091 16 16 14.2091 16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16ZM11 1H13V4H11V1ZM11 20H13V23H11V20ZM3.51472 4.92893L4.92893 3.51472L7.05025 5.63604L5.63604 7.05025L3.51472 4.92893ZM16.9497 18.364L18.364 16.9497L20.4853 19.0711L19.0711 20.4853L16.9497 18.364ZM19.0711 3.51472L20.4853 4.92893L18.364 7.05025L16.9497 5.63604L19.0711 3.51472ZM5.63604 16.9497L7.05025 18.364L4.92893 20.4853L3.51472 19.0711L5.63604 16.9497ZM23 11V13H20V11H23ZM4 11V13H1V11H4Z" fill="currentColor"></path></svg>
+</span>
+    </button>
+    
+  </div>
+</footer>
+
+  </main>
+</div>
+
+  
+<script src="/js/lightense.min.js"></script>
+
+
+  <script src="https://agourlay.github.io/js/main.js"></script>
+</body>
+
+</html>
